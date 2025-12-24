@@ -8,6 +8,15 @@
         "SENDER_EMAIL_ADDRESS": "{{RESEND_SENDER_EMAIL}}",
         "REPLY_TO_EMAIL_ADDRESS": "{{RESEND_REPLY_TO_EMAIL}}"
       }
+    },
+    "nia": {
+      "type": "stdio",
+      "command": "pipx",
+      "args": ["run", "--no-cache", "nia-mcp-server"],
+      "env": {
+        "NIA_API_KEY": "{{NIA_API_KEY}}",
+        "NIA_API_URL": "{{NIA_API_URL}}"
+      }
     }
   }
 }
