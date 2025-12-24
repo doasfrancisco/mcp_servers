@@ -1,0 +1,49 @@
+# Environment variables (contains secrets)
+.env
+
+# Generated configs (contain API keys)
+config/**/generated-*.json
+
+# Node modules (will be in each server's folder)
+node_modules/
+
+# Build artifacts (optional - can rebuild)
+# servers/*/build/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+build/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

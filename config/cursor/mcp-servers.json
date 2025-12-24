@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "resend": {
+      "type": "command",
+      "command": "node {{MCP_SERVERS_PATH}}/servers/resend/build/index.js --key={{RESEND_API_KEY}} --sender={{RESEND_SENDER_EMAIL}} --reply-to={{RESEND_REPLY_TO_EMAIL}}"
+    }
+  }
+}
