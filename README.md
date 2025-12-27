@@ -1,22 +1,27 @@
 # MCP Servers
 
 ```bash
-# 1. Install servers
-node setup.js
+# Install dependencies
+bun install
 ```
 
 ```bash
-# 2. Add API keys
-cp .env.example .env
-# Edit .env with your keys
+# Get API keys
+bunx dotenv-vault@latest new <project-id>
+bunx dotenv-vault@latest pull
 ```
 
 ```bash
-# 3. Generate MCP configs
-node generate-config.js
+# Install servers
+bun run scripts/setup.js
 ```
 
 ```bash
-# 4. Add to Claude Code (optional)
-node add-mcps-to-claude-code.js
+# Generate MCP configs
+bun run scripts/generate-config.js
+```
+
+### Add MCPs to Claude Code (optional)
+```bash
+bun run scripts/add-mcps-to-claude-code.js
 ```
