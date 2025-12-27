@@ -2,7 +2,7 @@ const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
-const ROOT_DIR = __dirname;
+const ROOT_DIR = path.join(__dirname, "..");
 const CLAUDE_CODE_CONFIG_DIR = path.join(ROOT_DIR, "config", "claude-code");
 const IS_WINDOWS = process.platform === "win32";
 const SHELL = IS_WINDOWS ? "pwsh" : "/bin/bash";

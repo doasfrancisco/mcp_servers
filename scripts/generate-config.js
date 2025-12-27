@@ -93,7 +93,10 @@ console.log("Config generation complete!");
 console.log("===================================\n");
 
 console.log("To add a server to Claude Code:");
-console.log('  claude mcp add-json <name> "$(cat config/claude-code/generated-<name>.json)" --scope user');
+console.log(' bun run scripts/add-mcps-to-claude-code.js ')
+console.log("");
+console.log('Or manually: ')
+console.log(' claude mcp add-json <name> "$(cat config/claude-code/generated-<name>.json)" --scope user');
 console.log("");
 console.log("Example:");
 console.log('  claude mcp add-json resend "$(cat config/claude-code/generated-resend.json)" --scope user');
