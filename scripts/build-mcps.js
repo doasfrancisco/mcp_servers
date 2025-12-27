@@ -2,7 +2,7 @@ const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
-const ROOT_DIR = __dirname;
+const ROOT_DIR = path.join(__dirname, "..");
 const SERVERS_DIR = path.join(ROOT_DIR, "servers");
 
 const serverDirs = fs
