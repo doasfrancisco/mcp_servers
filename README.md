@@ -13,12 +13,12 @@ bunx dotenv-vault@latest pull
 
 ```bash
 # Install servers
-bun run scripts/setup.js
+bun run scripts/build-mcps.js
 ```
 
 ```bash
 # Generate MCP configs
-bun run scripts/generate-config.js
+bun run scripts/generate-mcp-config.js
 ```
 
 ### Add MCPs to Claude Code (optional)
