@@ -1,6 +1,9 @@
 # Environment variables (contains secrets)
 .env
 
+# OAuth tokens (contains secrets)
+.tokens.json
+
 # Generated configs (contain API keys)
 config/**/generated-*.json
 

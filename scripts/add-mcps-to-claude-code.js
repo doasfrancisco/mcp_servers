@@ -24,7 +24,7 @@ try {
   // Format: "resend: node C:/... - ✓ Connected"
   const lines = listOutput.split("\n");
   for (const line of lines) {
-    const match = line.match(/^(\w+):/);
+    const match = line.match(/^([\w-]+):/);
     if (match) {
       existingServers.push(match[1]);
     }

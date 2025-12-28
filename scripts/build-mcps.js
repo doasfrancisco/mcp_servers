@@ -1,4 +1,4 @@
-const { execSync } = require("child_process");
+const { execSync, spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
@@ -31,9 +31,30 @@ for (const serverName of serverDirs) {
     console.log("Running npm install...");
     execSync("npm install", { cwd: serverPath, stdio: "inherit" });
 
-    // Run npm run build
-    console.log("Running npm run build...");
-    execSync("npm run build", { cwd: serverPath, stdio: "inherit" });
+    // Check if there's a build script
+    const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
+    if (pkg.scripts && pkg.scripts.build) {
+      console.log("Running npm run build...");
+      execSync("npm run build", { cwd: serverPath, stdio: "inherit" });
+    }
+
+    // Special handling for supermemory OAuth
+    if (serverName === "supermemory") {
+      const tokensFile = path.join(serverPath, ".tokens.json");
+      if (!fs.existsSync(tokensFile)) {
+        console.log("\nSupermemory requires OAuth authentication.");
+        console.log("Running oauth-helper.js...\n");
+        const result = spawnSync("node", ["oauth-helper.js"], {
+          cwd: serverPath,
+          stdio: "inherit",
+        });
+        if (result.status !== 0) {
+          throw new Error("OAuth setup failed");
+        }
+      } else {
+        console.log("OAuth tokens already exist, skipping authentication.");
+      }
+    }
 
     console.log(`✓ ${serverName} ready\n`);
     successCount++;

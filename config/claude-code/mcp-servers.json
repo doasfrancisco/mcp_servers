@@ -15,6 +15,40 @@
       "headers": {
         "Authorization": "Bearer {{NIA_API_KEY}}"
       }
+    },
+    "google-drive": {
+      "type": "http",
+      "url": "{{GOOGLE_DRIVE_URL}}",
+      "headers": {
+        "x-api-key": "{{GOOGLE_DRIVE_KEY}}"
+      }
+    },
+    "whatsapp": {
+      "type": "http",
+      "url": "{{WHATSAPP_URL}}",
+      "headers": {
+        "Authorization": "Bearer {{WHATSAPP_KEY}}"
+      }
+    },
+    "supermemory": {
+      "command": "node",
+      "args": ["{{MCP_SERVERS_PATH}}/servers/supermemory/run.js"],
+      "env": {
+        "SUPERMEMORY_API_KEY": "{{SUPERMEMORY_API_KEY}}"
+      }
+    },
+    "crosspost": {
+      "command": "node",
+      "args": [
+        "{{MCP_SERVERS_PATH}}/servers/crosspost/run.js",
+        "-t"
+      ],
+      "env": {
+        "TWITTER_ACCESS_TOKEN_KEY": "{{TWITTER_ACCESS_TOKEN_KEY}}",
+        "TWITTER_ACCESS_TOKEN_SECRET": "{{TWITTER_ACCESS_TOKEN_SECRET}}",
+        "TWITTER_API_CONSUMER_KEY": "{{TWITTER_API_CONSUMER_KEY}}",
+        "TWITTER_API_CONSUMER_SECRET": "{{TWITTER_API_CONSUMER_SECRET}}"
+      }
     }
   }
 }

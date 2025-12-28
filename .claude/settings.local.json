@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__whatsapp__whatsapp_connection_status"
+    ]
+  }
+}
