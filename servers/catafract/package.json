@@ -1,0 +1,22 @@
+{
+  "name": "catafract-mcp",
+  "version": "1.0.0",
+  "description": "Multi-platform social media posting MCP server",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "ts-node server.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0"
+  },
+  "dependencies": {
+    "@metorial/mcp-server-sdk": "latest",
+    "@modelcontextprotocol/sdk": "latest",
+    "twitter-api-v2": "^1.18.0",
+    "zod": "^3.22.0"
+  }
+}

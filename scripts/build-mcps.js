@@ -10,6 +10,8 @@ const serverDirs = fs
   .filter((dirent) => dirent.isDirectory())
   .map((dirent) => dirent.name);
 
+const skipServers = ["supermemory", "catafract", "crosspost"];
+
 let successCount = 0;
 let failCount = 0;
 
@@ -54,6 +56,11 @@ for (const serverName of serverDirs) {
       } else {
         console.log("OAuth tokens already exist, skipping authentication.");
       }
+    }
+
+    if (skipServers.includes(serverName)) {
+      console.log(`Skipping ${serverName} (managed externally)\n`);
+      continue;
     }
 
     console.log(`✓ ${serverName} ready\n`);
