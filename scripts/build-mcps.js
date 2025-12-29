@@ -40,6 +40,15 @@ for (const serverName of serverDirs) {
       execSync("npm run build", { cwd: serverPath, stdio: "inherit" });
     }
 
+    // Special handling for nia - uses pipx
+    if (serverName === "nia") {
+      console.log("Installing nia-mcp-server via pipx...");
+      execSync("pipx install nia-mcp-server", { cwd: serverPath, stdio: "inherit" });
+      console.log(`✓ ${serverName} ready\n`);
+      successCount++;
+      continue;
+    }
+
     // Special handling for supermemory OAuth
     if (serverName === "supermemory") {
       const tokensFile = path.join(serverPath, ".tokens.json");

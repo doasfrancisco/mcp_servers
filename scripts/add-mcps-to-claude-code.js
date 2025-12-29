@@ -16,6 +16,8 @@ console.log("Checking currently added MCP servers...");
 console.log("-----------------------------------");
 
 let existingServers = [];
+const ignoreServers = ["nia-old"]
+
 try {
   const listOutput = execSync("claude mcp list", { encoding: "utf-8" });
   console.log(listOutput);
@@ -69,6 +71,12 @@ for (const serverName of availableServers) {
     skippedCount++;
     continue;
   }
+  
+  if (ignoreServers.includes(serverName)) {
+    console.log(`⏭  ${serverName} - ignored, skipping`);
+    skippedCount++;
+    continue;
+  }
 
   const configPath = path.join(CLAUDE_CODE_CONFIG_DIR, `generated-${serverName}.json`).replace(/\\/g, "/");
 
@@ -88,3 +96,9 @@ for (const serverName of availableServers) {
 console.log("\n===================================");
 console.log(`Done! Added: ${addedCount}, Skipped: ${skippedCount}`);
 console.log("===================================");
+
+// Warning for nia - pipx needs a terminal restart to be in PATH
+if (availableServers.includes("nia") && !existingServers.includes("nia")) {
+  console.log("\n⚠️  Note: If you just installed nia via pipx, you may need to");
+  console.log("   close and reopen your terminal for pipx to be in your PATH and Nia to get picked up");
+}

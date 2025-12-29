@@ -10,11 +10,13 @@
       }
     },
     "nia": {
-      "type": "http",
-      "url": "{{NIA_API_URL}}mcp",
-      "headers": {
-        "Authorization": "Bearer {{NIA_API_KEY}}"
-      }
+      "command": "node",
+      "args": ["{{MCP_SERVERS_PATH}}/servers/nia/index.js"],
+      "env": {
+        "NIA_API_KEY": "{{NIA_API_KEY}}",
+        "NIA_API_URL": "https://apigcp.trynia.ai/"
+      },
+      "disabled": false
     },
     "google-drive": {
       "type": "http",
@@ -42,6 +44,17 @@
       "url": "{{CATAFRACT_URL}}",
       "headers": {
         "Authorization": "Bearer {{CATAFRACT_API_KEY}}"
+      }
+    },
+    "figma": {
+      "type": "http",
+      "url": "{{FIGMA_URL}}"
+    },
+    "notion": {
+      "type": "http",
+      "url": "{{NOTION_URL}}",
+      "headers": {
+        "x-api-key": "{{NOTION_KEY}}"
       }
     }
   }
