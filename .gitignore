@@ -1,3 +1,6 @@
+memory.json
+venv/
+
 # Environment variables (contains secrets)
 .env
 

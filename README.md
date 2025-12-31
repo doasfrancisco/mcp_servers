@@ -1,5 +1,12 @@
 # MCP Servers
 
+## Hosted MCP Servers
+
+I use the following services to host MCP servers:
+
+- **[Metorial](https://metorial.com)** - Managed MCP server hosting
+- **[Composio](https://composio.dev)** - MCP server platform with pre-built integrations
+
 ```bash
 # Install dependencies
 bun install

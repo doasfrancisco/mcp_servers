@@ -56,6 +56,10 @@
       "headers": {
         "x-api-key": "{{NOTION_KEY}}"
       }
+    },
+    "todoist": {
+      "type": "http",
+      "url": "{{TODOIST_URL}}"
     }
   }
 }

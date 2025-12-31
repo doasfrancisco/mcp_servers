@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "mcp__whatsapp__whatsapp_connection_status"
+      "mcp__whatsapp__whatsapp_connection_status",
+      "mcp__supermemory__addMemory",
+      "mcp__supermemory__search",
+      "mcp__figma__generate_diagram",
+      "mcp__todoist__find-tasks-by-date",
+      "mcp__todoist__get-overview"
     ]
   }
 }
