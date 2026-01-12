@@ -60,6 +60,10 @@
     "todoist": {
       "type": "http",
       "url": "{{TODOIST_URL}}"
+    },
+    "playwright": {
+      "command": "cmd",
+      "args": ["/c", "npx", "@playwright/mcp@latest"]
     }
   }
 }
