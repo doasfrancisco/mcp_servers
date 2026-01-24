@@ -10,7 +10,7 @@ venv/
 .tokens.json
 
 # Generated configs (contain API keys)
-config/**/generated-*.json
+generated-*.json
 
 # Node modules (will be in each server's folder)
 node_modules/

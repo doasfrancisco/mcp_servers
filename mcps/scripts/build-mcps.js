@@ -29,6 +29,10 @@ for (const serverName of serverDirs) {
   console.log("-----------------------------------");
 
   try {
+    if (skipServers.includes(serverName)) {
+      console.log(`Skipping ${serverName} (managed externally)\n`);
+      continue;
+    }
     // Run npm install
     console.log("Running npm install...");
     execSync("npm install", { cwd: serverPath, stdio: "inherit" });
@@ -65,11 +69,6 @@ for (const serverName of serverDirs) {
       } else {
         console.log("OAuth tokens already exist, skipping authentication.");
       }
-    }
-
-    if (skipServers.includes(serverName)) {
-      console.log(`Skipping ${serverName} (managed externally)\n`);
-      continue;
     }
 
     console.log(`✓ ${serverName} ready\n`);

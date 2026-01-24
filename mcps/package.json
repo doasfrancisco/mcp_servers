@@ -1,5 +1,7 @@
 {
-  "name": "mcp_servers",
+  "name": "mcps",
+  "module": "index.ts",
+  "type": "module",
   "private": true,
   "devDependencies": {
     "@types/bun": "latest"

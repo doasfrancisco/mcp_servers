@@ -1,0 +1,33 @@
+{
+  "mcpServers": {
+    "resend": {
+      "command": "node",
+      "args": ["{{MCP_SERVERS_PATH}}/servers/resend/build/index.js"],
+      "env": {
+        "RESEND_API_KEY": "{{RESEND_API_KEY}}",
+        "SENDER_EMAIL_ADDRESS": "{{RESEND_SENDER_EMAIL}}",
+        "REPLY_TO_EMAIL_ADDRESS": "{{RESEND_REPLY_TO_EMAIL}}"
+      }
+    },
+    "nia": {
+      "command": "node",
+      "args": ["{{MCP_SERVERS_PATH}}/servers/nia/index.js"],
+      "env": {
+        "NIA_API_KEY": "{{NIA_API_KEY}}",
+        "NIA_API_URL": "https://apigcp.trynia.ai/"
+      },
+      "disabled": false
+    },
+    "catafract": {
+      "type": "http",
+      "url": "{{CATAFRACT_URL}}",
+      "headers": {
+        "Authorization": "Bearer {{CATAFRACT_API_KEY}}"
+      }
+    },
+    "playwright": {
+      "command": "cmd",
+      "args": ["/c", "npx", "@playwright/mcp@latest"]
+    }
+  }
+}

@@ -1,10 +1,10 @@
-# Claude Code Bash Logging Hook (Windows)
+# Hooks Quickstart (Windows)
 
-Logs all Bash commands Claude Code runs to a file.
+Logs all commands Claude Code runs to a file.
 
 ## Setup
 
-Add this to `~/.claude/settings.json`:
+Add to `~/.claude/settings.json`:
 
 ```json
 {
@@ -28,7 +28,7 @@ Add this to `~/.claude/settings.json`:
 
 **Log location:** `%USERPROFILE%\.claude\bash-command-log.txt`
 
-## Why Windows Needs Different Syntax
+## Windows Needs Different Syntax
 
 The official docs provide a Unix command that fails on Windows:
 
