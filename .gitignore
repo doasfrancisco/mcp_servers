@@ -8,6 +8,8 @@ venv/
 
 # OAuth tokens (contains secrets)
 .tokens.json
+mcps/servers/gmail/credentials/*.json
+mcps/servers/gmail/accounts.json
 
 # Generated configs (contain API keys)
 generated-*.json
@@ -17,6 +19,15 @@ node_modules/
 
 # Build artifacts (optional - can rebuild)
 # servers/*/build/
+
+# Python bytecode
+__pycache__/
+
+# Claude Code local settings
+.claude/
+
+# Windows crash dumps
+*.stackdump
 
 # OS files
 .DS_Store
