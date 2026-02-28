@@ -76,7 +76,7 @@ service.users().messages().batchModify(
 
 ### Tag system via Gmail labels
 
-Custom tags map to Gmail labels prefixed with `claude/` (e.g., `claude/credentials`). The `important` tag maps to `STARRED`. Labels are auto-created on first use via `labels().create()`.
+Custom tags map directly to Gmail labels (e.g., `credentials`, `contacts`). The `important` tag maps to `STARRED`. Labels are auto-created on first use via `labels().create()`. `list_tags` returns all user-created labels grouped by account.
 
 ## MCP Server Design
 
