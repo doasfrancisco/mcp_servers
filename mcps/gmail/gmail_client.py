@@ -2,6 +2,8 @@
 
 import base64
 import json
+import re
+import urllib.request
 from email.mime.text import MIMEText
 from pathlib import Path
 
@@ -270,13 +272,6 @@ class GmailClient:
 
         return {"id": sent["id"], "threadId": sent.get("threadId"), "account": alias}
 
-    def trash_message(self, message_id: str, account: str) -> dict:
-        """Move a message to trash."""
-        alias = self._resolve_alias(account)
-        service = self._get_service(alias)
-        service.users().messages().trash(userId="me", id=message_id).execute()
-        return {"id": message_id, "account": alias, "status": "trashed"}
-
     def trash_messages(self, messages: list[dict]) -> dict:
         """Move multiple messages to trash, grouped by account into batchModify calls."""
         by_account: dict[str, list[str]] = {}
@@ -397,12 +392,131 @@ class GmailClient:
             "accounts": accounts,
         }
 
+    def delete_tag(self, tag: str, account: str | None = None) -> dict:
+        """Permanently delete a tag (Gmail label) from one or all accounts.
+
+        Cannot delete "important" — it maps to Gmail's STARRED system label.
+        """
+        if tag.lower() == "important":
+            return {"status": "error", "message": "Cannot delete 'important' — it maps to Gmail's STARRED system label."}
+
+        aliases = [self._resolve_alias(account)] if account else self._get_all_aliases()
+        results = []
+
+        for alias in aliases:
+            service = self._get_service(alias)
+            labels = service.users().labels().list(userId="me").execute().get("labels", [])
+            label_id = None
+            for label in labels:
+                if label["name"].lower() == tag.lower() and label.get("type") == "user":
+                    label_id = label["id"]
+                    break
+
+            if label_id is None:
+                results.append({"account": alias, "status": "not_found"})
+                continue
+
+            service.users().labels().delete(userId="me", id=label_id).execute()
+            results.append({"account": alias, "status": "deleted", "tag": tag})
+
+        return {"tag": tag, "accounts": results}
+
     def untrash_message(self, message_id: str, account: str) -> dict:
         """Recover a message from trash."""
         alias = self._resolve_alias(account)
         service = self._get_service(alias)
         service.users().messages().untrash(userId="me", id=message_id).execute()
         return {"id": message_id, "account": alias, "status": "untrashed"}
+
+    def unsubscribe(self, message_id: str, account: str) -> dict:
+        """Extract List-Unsubscribe header and attempt to unsubscribe.
+
+        Priority: HTTP one-click POST (RFC 8058) → return URL for manual visit.
+        """
+        alias = self._resolve_alias(account)
+        service = self._get_service(alias)
+        msg = (
+            service.users()
+            .messages()
+            .get(
+                userId="me",
+                id=message_id,
+                format="metadata",
+                metadataHeaders=["List-Unsubscribe", "List-Unsubscribe-Post", "From", "Subject"],
+            )
+            .execute()
+        )
+
+        headers = {h["name"].lower(): h["value"] for h in msg.get("payload", {}).get("headers", [])}
+        raw_unsub = headers.get("list-unsubscribe", "")
+        has_one_click = "list-unsubscribe=one-click" in headers.get("list-unsubscribe-post", "").lower()
+
+        if not raw_unsub:
+            return {
+                "id": message_id,
+                "account": alias,
+                "status": "no_unsubscribe_header",
+                "from": headers.get("from", ""),
+                "subject": headers.get("subject", ""),
+            }
+
+        # Parse mailto: and http(s): URLs from the header
+        # Future: mailto unsubscribe via Gmail API send_message
+        # mailto_match = re.search(r"<mailto:([^>]+)>", raw_unsub)
+        http_match = re.search(r"<(https?://[^>]+)>", raw_unsub)
+
+        http_url = http_match.group(1) if http_match else None
+
+        # Try HTTP one-click unsubscribe (RFC 8058)
+        if http_url and has_one_click:
+            try:
+                req = urllib.request.Request(
+                    http_url,
+                    data=b"List-Unsubscribe=One-Click",
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return {
+                        "id": message_id,
+                        "account": alias,
+                        "status": "unsubscribed",
+                        "method": "one_click_http",
+                        "http_status": resp.status,
+                        "from": headers.get("from", ""),
+                        "subject": headers.get("subject", ""),
+                    }
+            except Exception as e:
+                # One-click failed, fall through to return URL
+                return {
+                    "id": message_id,
+                    "account": alias,
+                    "status": "one_click_failed",
+                    "error": str(e),
+                    "url": http_url,
+                    "from": headers.get("from", ""),
+                    "subject": headers.get("subject", ""),
+                }
+
+        # Fallback: return the URL for manual visit
+        if http_url:
+            return {
+                "id": message_id,
+                "account": alias,
+                "status": "manual_url",
+                "url": http_url,
+                "from": headers.get("from", ""),
+                "subject": headers.get("subject", ""),
+            }
+
+        return {
+            "id": message_id,
+            "account": alias,
+            "status": "no_usable_link",
+            "raw_header": raw_unsub,
+            "from": headers.get("from", ""),
+            "subject": headers.get("subject", ""),
+        }
 
     def list_trash(self, max_results: int = 50, account: str | None = None) -> list[dict]:
         """List messages in trash. If account is None, lists from all accounts."""

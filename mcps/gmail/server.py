@@ -258,3 +258,31 @@ def gmail_list_trash(max_results: int = 50, account: str | None = None) -> str:
         account: Email or alias. Omit to list trash from all accounts.
     """
     return _json(_get_client().list_trash(max_results, account))
+
+
+@mcp.tool()
+def gmail_unsubscribe(message_id: str, account: str) -> str:
+    """STOP: Tell the user which email you're about to unsubscribe from and wait for confirmation. Do NOT call this tool in the same turn as the user's request.
+
+    Unsubscribe from a mailing list. Extracts the List-Unsubscribe header and attempts
+    HTTP one-click unsubscribe (RFC 8058). Falls back to returning the unsubscribe URL.
+
+    Args:
+        message_id: The Gmail message ID (from search results).
+        account: Email or alias — required for write operations.
+    """
+    return _json(_get_client().unsubscribe(message_id, account))
+
+
+@mcp.tool()
+def gmail_delete_tag(tag: str, account: str | None = None) -> str:
+    """STOP: Tell the user which tag you're about to delete and wait for confirmation. Do NOT call this tool in the same turn as the user's request.
+
+    Permanently delete a tag (Gmail label). Removes it from all messages that have it.
+    Cannot delete "important" (maps to Gmail's STARRED system label).
+
+    Args:
+        tag: Tag name to delete (e.g. "credentials", "auto/finances", or any custom tag).
+        account: Email or alias. Omit to delete from all accounts.
+    """
+    return _json(_get_client().delete_tag(tag, account))
