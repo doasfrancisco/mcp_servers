@@ -91,6 +91,11 @@ class GmailClient:
         self._services[alias] = service
         return service
 
+    def _get_label_map(self, service) -> dict[str, str]:
+        """Build label_id → label_name mapping for an account."""
+        labels = service.users().labels().list(userId="me").execute().get("labels", [])
+        return {label["id"]: label["name"] for label in labels}
+
     def _format_message(self, msg: dict, alias: str) -> dict:
         """Extract useful fields from a Gmail API message resource."""
         headers = {h["name"].lower(): h["value"] for h in msg.get("payload", {}).get("headers", [])}
@@ -147,22 +152,6 @@ class GmailClient:
 
     # --- Public API ---
 
-    def get_profile(self, account: str | None = None) -> list[dict]:
-        """Get profile info. If account is None, returns all accounts."""
-        aliases = [self._resolve_alias(account)] if account else self._get_all_aliases()
-        results = []
-        for alias in aliases:
-            service = self._get_service(alias)
-            profile = service.users().getProfile(userId="me").execute()
-            results.append({
-                "account": alias,
-                "email": profile.get("emailAddress"),
-                "messagesTotal": profile.get("messagesTotal"),
-                "threadsTotal": profile.get("threadsTotal"),
-                "historyId": profile.get("historyId"),
-            })
-        return results
-
     def search_messages(
         self,
         query: str | None = None,
@@ -170,14 +159,22 @@ class GmailClient:
         from_email: str | None = None,
         max_results: int = 50,
         account: str | None = None,
-    ) -> list[dict]:
-        """Search emails. If account is None, searches all accounts."""
+        skip_auto: bool = True,
+    ) -> dict:
+        """Search emails. If account is None, searches all accounts.
+
+        When skip_auto=True, emails with auto/* labels are excluded from results
+        and their counts are returned in auto_skipped.
+        """
         gmail_query = self._build_query(query, date, from_email)
         aliases = [self._resolve_alias(account)] if account else self._get_all_aliases()
         results = []
+        label_maps: dict[str, dict[str, str]] = {}
 
         for alias in aliases:
             service = self._get_service(alias)
+            if skip_auto:
+                label_maps[alias] = self._get_label_map(service)
             resp = (
                 service.users()
                 .messages()
@@ -195,7 +192,25 @@ class GmailClient:
                 )
                 results.append(self._format_message(msg, alias))
 
-        return results
+        if not skip_auto:
+            return {"results": results, "auto_skipped": {}}
+
+        unsorted = []
+        skipped_counts: dict[str, int] = {}
+        for msg in results:
+            label_map = label_maps.get(msg["account"], {})
+            auto_tags = [
+                label_map[lid]
+                for lid in msg.get("labelIds", [])
+                if lid in label_map and label_map[lid].lower().startswith("auto/")
+            ]
+            if auto_tags:
+                for tag in auto_tags:
+                    skipped_counts[tag] = skipped_counts.get(tag, 0) + 1
+            else:
+                unsorted.append(msg)
+
+        return {"results": unsorted, "auto_skipped": skipped_counts}
 
     def read_message(self, message_id: str, account: str) -> dict:
         """Read a specific email by ID."""

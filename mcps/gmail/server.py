@@ -4,7 +4,7 @@ import json
 from typing import Annotated
 
 from fastmcp import FastMCP
-from pydantic import BaseModel, BeforeValidator
+from pydantic import BaseModel, BeforeValidator, model_validator
 
 from gmail_client import GmailClient
 
@@ -21,11 +21,28 @@ class MessageRef(BaseModel):
     account: str
 
 
+BUILTIN_TAGS = {"important", "credentials", "contacts"}
+
+
+def _auto_prefix(tag: str | None) -> str | None:
+    """Prepend 'auto/' to custom tags so AI-sorted mail is easy to filter out."""
+    if tag is None:
+        return None
+    if tag in BUILTIN_TAGS or tag.startswith("auto/"):
+        return tag
+    return f"auto/{tag}"
+
+
 class TagOp(BaseModel):
     id: str
     account: str
     tag: str | None = None
     remove_tag: str | None = None
+
+    @model_validator(mode="after")
+    def _prefix_tags(self):
+        self.tag = _auto_prefix(self.tag)
+        return self
 
 
 MessagesList = Annotated[list[MessageRef], BeforeValidator(_parse_json_str)]
@@ -33,7 +50,9 @@ TagOpList = Annotated[list[TagOp], BeforeValidator(_parse_json_str)]
 
 mcp = FastMCP(
     "Gmail",
-    instructions="""Before executing any write operation (trash, tag, send, create draft), always tell the user exactly what you're about to do and STOP your turn. Do NOT call the tool in the same message. Wait for the user to reply with confirmation before making the call.
+    instructions="""IMPORTANT: Always discover a tool's schema with ToolSearch BEFORE calling it for the first time.
+
+Before executing any write operation (trash, tag, send, create draft), always tell the user exactly what you're about to do and STOP your turn. Do NOT call the tool in the same message. Wait for the user to reply with confirmation before making the call.
 
 When presenting email results to the user, always:
 - Group by account (personal, work, university)
@@ -49,8 +68,9 @@ Custom tags beyond these three are also supported and auto-created on first use.
 
 Auto-sorted emails:
 - Emails tagged with "auto/*" labels (e.g. "auto/finances") have already been reviewed and sorted by the AI.
-- When the user asks for today's emails or checks their inbox casually, append -label:auto/finances (and any other auto/* tags) to the gmail_search_messages query to exclude already-sorted emails.
-- When the user explicitly asks to see auto-sorted emails (e.g. "show me my auto/finances emails"), do NOT exclude them.
+- gmail_search_messages automatically skips auto/* emails by default and returns their counts in "auto_skipped".
+- Always show the auto_skipped summary to the user (e.g. "Also sorted: auto/programming (1), auto/finances (3)").
+- When the user asks to "show all" or explicitly wants auto-sorted emails, set skip_auto=false.
 """,
 )
 
@@ -69,29 +89,18 @@ def _json(data) -> str:
 
 
 @mcp.tool()
-def gmail_get_profile(account: str | None = None) -> str:
-    """Get Gmail account profile info (email, messages total, threads total).
-
-    Args:
-        account: Email or alias (e.g. "personal" or "you@gmail.com"). Omit to query all accounts.
-    """
-    return _json(_get_client().get_profile(account))
-
-
-@mcp.tool()
 def gmail_search_messages(
     query: str | None = None,
     date: str | None = None,
     from_email: str | None = None,
     max_results: int = 200,
     account: str | None = None,
+    skip_auto: bool = True,
 ) -> str:
     """Search emails using Gmail query syntax.
 
-    IMPORTANT: For casual email checks (e.g. "what emails today", "check my inbox"),
-    append "-label:auto/finances" (and any other auto/* tags) to the query to exclude
-    already-sorted emails. Only skip this exclusion when the user explicitly asks to
-    see auto-sorted emails.
+    By default, emails with auto/* tags are excluded from results and their counts
+    are returned in "auto_skipped". Set skip_auto=false to include everything.
 
     Args:
         query: Raw Gmail query string (e.g. "subject:invoice", "is:unread").
@@ -100,8 +109,9 @@ def gmail_search_messages(
         from_email: Filter by sender email address.
         max_results: Maximum number of results (default 50).
         account: Email or alias. Omit to search all accounts.
+        skip_auto: Exclude auto/* tagged emails from results (default true). Their counts are returned in auto_skipped.
     """
-    return _json(_get_client().search_messages(query, date, from_email, max_results, account))
+    return _json(_get_client().search_messages(query, date, from_email, max_results, account, skip_auto))
 
 
 @mcp.tool()
