@@ -8,6 +8,15 @@
 mcps/gmail/credentials/*.json
 mcps/gmail/accounts.json
 
+# WhatsApp session, cache & local data (contains secrets)
+mcps/whatsapp/.wwebjs_auth/
+mcps/whatsapp/.wwebjs_cache/
+mcps/whatsapp/contacts.json
+mcps/whatsapp/chats.json
+mcps/whatsapp/chats_legacy.json
+mcps/whatsapp/tags.json
+mcps/whatsapp/messages/
+
 # Node
 node_modules/
 build/

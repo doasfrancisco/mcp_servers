@@ -8,3 +8,25 @@
 
 - **Share MCP usage guide** — Document how to use the Dámelo Share MCP for exporting, importing, and sharing sessions with teams.
 - **Gmail: mailto unsubscribe** — Add mailto: support to `gmail_unsubscribe` (send an email to the unsubscribe address via Gmail API) for senders that don't support HTTP one-click.
+- **Gmail: improve tool discoverability** — Claude guesses wrong param names when calling tools it hasn't discovered via `ToolSearch` first (e.g. `message_ids` instead of `messages`, `tag` as top-level instead of per-message). Improve docstrings to be more explicit about the schema, or explore ways to make the tool signatures self-evident so even undiscovered calls are less error-prone.
+
+### Gmail: tool consolidation
+
+Three tools are redundant with `gmail_search_messages`:
+
+| Tool | Equivalent search query | Unique value? |
+|---|---|---|
+| `gmail_list_drafts` | `query="is:draft"` | Returns `draftId`, but no tool uses it (no update/send-draft) |
+| `gmail_get_tagged` | `query="is:starred"` or `query="label:credentials"` | None — just tag→query resolution the AI can do itself |
+| `gmail_list_trash` | `query="in:trash"` | None |
+
+**Why not now:** These tools work fine and removing them requires updating the MCP instructions to teach the AI the equivalent Gmail queries. Low priority since the current tool count (15) isn't causing real confusion yet. Revisit if adding more tools pushes the count higher.
+
+Two more potential merges:
+
+| Merge | How | Worth it? |
+|---|---|---|
+| `gmail_create_draft` + `gmail_send_message` | Add `draft: bool = False` param | Saves 1 tool, but they're distinct write operations with different risk levels — drafts are safe, sends are irreversible. Merging could blur that boundary. |
+| `gmail_read_message` + `gmail_read_thread` | Add `thread: bool = False` param | Saves 1 tool, but return shapes differ (single message vs list of messages). Merging makes the docstring harder to understand. |
+
+**Why not now:** The borderline merges save 1 tool each but make the remaining tools harder to understand. The clarity tradeoff isn't worth it unless tool count becomes a real problem.
