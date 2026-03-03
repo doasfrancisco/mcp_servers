@@ -4,7 +4,9 @@ import base64
 import json
 import re
 import urllib.request
+from datetime import datetime, timezone
 from email.mime.text import MIMEText
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from googleapiclient.discovery import build
@@ -109,6 +111,17 @@ class GmailClient:
         labels = service.users().labels().list(userId="me").execute().get("labels", [])
         return {label["id"]: label["name"] for label in labels}
 
+    @staticmethod
+    def _localize_date(raw: str) -> str:
+        """Convert an RFC 2822 email date to the system's local timezone."""
+        if not raw:
+            return ""
+        try:
+            dt = parsedate_to_datetime(raw).astimezone()
+            return dt.strftime("%Y-%m-%d %I:%M %p")
+        except Exception:
+            return raw
+
     def _format_message(self, msg: dict, alias: str) -> dict:
         """Extract useful fields from a Gmail API message resource."""
         headers = {h["name"].lower(): h["value"] for h in msg.get("payload", {}).get("headers", [])}
@@ -119,7 +132,7 @@ class GmailClient:
             "from": headers.get("from", ""),
             "to": headers.get("to", ""),
             "subject": headers.get("subject", ""),
-            "date": headers.get("date", ""),
+            "date": self._localize_date(headers.get("date", "")),
             "snippet": msg.get("snippet", ""),
             "labelIds": msg.get("labelIds", []),
         }
@@ -162,6 +175,39 @@ class GmailClient:
         if from_email:
             parts.append(f"from:{from_email}")
         return " ".join(parts)
+
+    def _mark_as_read(self, messages: list[dict]) -> None:
+        """Mark search results as read. Uses threads().modify for multi-message
+        threads (one call per thread) and messages().batchModify for standalone
+        messages (one call per account)."""
+        from collections import Counter
+
+        thread_counts: Counter = Counter()
+        for msg in messages:
+            thread_counts[(msg["account"], msg.get("threadId"))] += 1
+
+        thread_ids_by_account: dict[str, set[str]] = {}
+        single_ids_by_account: dict[str, list[str]] = {}
+        for msg in messages:
+            alias = msg["account"]
+            tid = msg.get("threadId")
+            if thread_counts[(alias, tid)] > 1:
+                thread_ids_by_account.setdefault(alias, set()).add(tid)
+            else:
+                single_ids_by_account.setdefault(alias, []).append(msg["id"])
+
+        for alias, tids in thread_ids_by_account.items():
+            service = self._get_service(alias)
+            for tid in tids:
+                service.users().threads().modify(
+                    userId="me", id=tid, body={"removeLabelIds": ["UNREAD"]}
+                ).execute()
+
+        for alias, ids in single_ids_by_account.items():
+            service = self._get_service(alias)
+            service.users().messages().batchModify(
+                userId="me", body={"ids": ids, "removeLabelIds": ["UNREAD"]}
+            ).execute()
 
     # --- Public API ---
 
@@ -206,6 +252,7 @@ class GmailClient:
                 results.append(self._format_message(msg, alias))
 
         if not skip_auto:
+            self._mark_as_read(results)
             return {"results": results, "auto_skipped": {}}
 
         unsorted = []
@@ -223,6 +270,7 @@ class GmailClient:
             else:
                 unsorted.append(msg)
 
+        self._mark_as_read(unsorted)
         return {"results": unsorted, "auto_skipped": skipped_counts}
 
     def read_message(self, message_id: str, account: str) -> dict:
