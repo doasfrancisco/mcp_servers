@@ -1,6 +1,7 @@
 #!/bin/bash
 # Custom @ file picker for meta-repo with nested git repos.
-# Caches file index for speed; rebuilds every 60s in background.
+# Uses git index for speed: tracked files + recurse into ignored sub-repos.
+# Caches results; rebuilds every 60s in background.
 
 PROJECT_HASH=$(pwd | md5sum | cut -d' ' -f1)
 CACHE_DIR="${TMPDIR:-/tmp}/claude-file-suggestion-${PROJECT_HASH}"
@@ -12,25 +13,19 @@ CACHE_TTL=60
 mkdir -p "$CACHE_DIR"
 
 build_index() {
-  find . \
-    -not -path '*/.git/*' \
-    -not -path '*/node_modules/*' \
-    -not -path '*/.next/*' \
-    -not -path '*/dist/*' \
-    -not -path '*/__pycache__/*' \
-    -not -path '*/.cache/*' \
-    -not -path '*/*.pack.gz' \
-    -not -path '*/venv/*' \
-    -not -path '*/.venv/*' \
-    -not -path '*/.mypy_cache/*' \
-    -not -path '*/.pytest_cache/*' \
-    -not -path '*/bin/*' \
-    -not -path '*/obj/*' \
-    -type f \
-    2>/dev/null \
-    | sed 's|^\./||' \
-    | sort > "$CACHE_FILE.tmp"
-  # Pre-compute unique directories (only from paths that contain a /)
+  {
+    # 1. Root repo tracked files
+    git ls-files 2>/dev/null
+
+    # 2. Find ignored sub-repos and list their tracked files
+    git ls-files --others --ignored --exclude-standard 2>/dev/null | while read -r dir; do
+      dir="${dir%/}"
+      [ -d "$dir/.git" ] || continue
+      git -C "$dir" ls-files 2>/dev/null | sed "s|^|$dir/|"
+    done
+  } | sort > "$CACHE_FILE.tmp"
+
+  # Pre-compute unique directories
   grep '/' "$CACHE_FILE.tmp" | sed 's|/[^/]*$||' | sort -u | sed 's|$|/|' > "$CACHE_DIRS.tmp"
   mv "$CACHE_FILE.tmp" "$CACHE_FILE"
   mv "$CACHE_DIRS.tmp" "$CACHE_DIRS"

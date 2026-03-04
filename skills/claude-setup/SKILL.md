@@ -67,6 +67,11 @@ Every message MUST answer both **what** changed and **why** it changed.
 
 Bad: `feat: add repo mapping` — missing the why.
 Good: `feat: add repo mapping to centralize project navigation`
+
+Always stage with `git add .` before committing.
+
+Bad: `git add file1.txt file2.txt && git commit -m "..."`
+Good: `git add . && git commit -m "..."`
 ```
 
 Ask if this is a **meta-repo** (multiple independent git repos in subfolders). If yes, also include:
@@ -98,13 +103,13 @@ cp <skill-path>/scripts/play-sound.py ~/.claude/play-sound.py
 
 The global `~/.claude/settings.json` hooks should reference the skill's default fallback sounds (the Peon `.wav` files in `assets/sounds/`). Generate hooks for these events:
 
-- **SessionStart** → `start.wav` / fallback `PeonReady1.wav`
-- **UserPromptSubmit** → `submit.wav` / fallback `PeonYes3.wav`
-- **Notification** → `notify.wav` / fallback `PeonWhat3.wav`
-- **Stop** → `done.wav` / fallback `PeonBuildingComplete1.wav`
+- **SessionStart** → `start.wav`
+- **UserPromptSubmit** → `submit.wav`
+- **Notification** → `notify.wav`
+- **Stop** → `done.wav`
 
 Each hook command:
 
 ```
-python ~/.claude/play-sound.py <sound_name>.wav <skill-path>/assets/sounds/<FallbackFile>.wav
+python ~/.claude/play-sound.py <sound_name>.wav <skill-path>/assets/sounds/<sound_name>.wav
 ```

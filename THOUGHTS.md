@@ -89,3 +89,13 @@ claude mcp add -s user gmail -- uv run --directory /path/to/server fastmcp run s
 ```
 
 No venv activation needed — `uv` handles it transparently.
+
+### Compiling to native binaries for distribution
+
+Code running locally on the user's machine can be protected from reading by compiling to native binaries. Options by runtime:
+
+- **Bun** (JS/TS) — `bun build --compile server.ts --outfile server` — single executable, hard to reverse. Claude Code's own CLI uses this approach.
+- **Node.js** — `pkg` or `nexe` — bundles code + runtime into one binary.
+- **Python** — Nuitka (compiles to C then to binary, strongest protection) or PyInstaller (bundles but easier to extract).
+
+None are truly unreadable to determined reverse engineers, but they raise the bar significantly vs shipping plain source.
