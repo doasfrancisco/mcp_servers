@@ -161,6 +161,27 @@ class GmailClient:
             attachments.extend(self._get_attachments_list(part))
         return attachments
 
+    def _batch_get_messages(self, service, message_ids: list[str], alias: str) -> list[dict]:
+        """Fetch message metadata in batches of 1000 using Gmail's batch API."""
+        fetched: list[dict] = []
+
+        def _callback(request_id, response, exception):
+            if exception is None:
+                fetched.append(self._format_message(response, alias))
+
+        for i in range(0, len(message_ids), 1000):
+            batch = service.new_batch_http_request(callback=_callback)
+            for msg_id in message_ids[i:i + 1000]:
+                batch.add(
+                    service.users().messages().get(
+                        userId="me", id=msg_id, format="metadata",
+                        metadataHeaders=["From", "To", "Subject", "Date"],
+                    )
+                )
+            batch.execute()
+
+        return fetched
+
     def _build_query(self, query: str | None, date: str | None, from_email: str | None) -> str:
         """Build a Gmail search query from convenience params."""
         parts = []
@@ -240,16 +261,8 @@ class GmailClient:
                 .list(userId="me", q=gmail_query or None, maxResults=max_results)
                 .execute()
             )
-            messages = resp.get("messages", [])
-            for msg_ref in messages:
-                msg = (
-                    service.users()
-                    .messages()
-                    .get(userId="me", id=msg_ref["id"], format="metadata",
-                         metadataHeaders=["From", "To", "Subject", "Date"])
-                    .execute()
-                )
-                results.append(self._format_message(msg, alias))
+            message_ids = [m["id"] for m in resp.get("messages", [])]
+            results.extend(self._batch_get_messages(service, message_ids, alias))
 
         if not skip_auto:
             self._mark_as_read(results)
@@ -436,15 +449,8 @@ class GmailClient:
                 .list(userId="me", q=query, maxResults=max_results)
                 .execute()
             )
-            for msg_ref in resp.get("messages", []):
-                msg = (
-                    service.users()
-                    .messages()
-                    .get(userId="me", id=msg_ref["id"], format="metadata",
-                         metadataHeaders=["From", "To", "Subject", "Date"])
-                    .execute()
-                )
-                results.append(self._format_message(msg, alias))
+            message_ids = [m["id"] for m in resp.get("messages", [])]
+            results.extend(self._batch_get_messages(service, message_ids, alias))
 
         return results
 
@@ -607,14 +613,7 @@ class GmailClient:
                 .list(userId="me", q="in:trash", maxResults=max_results)
                 .execute()
             )
-            for msg_ref in resp.get("messages", []):
-                msg = (
-                    service.users()
-                    .messages()
-                    .get(userId="me", id=msg_ref["id"], format="metadata",
-                         metadataHeaders=["From", "To", "Subject", "Date"])
-                    .execute()
-                )
-                results.append(self._format_message(msg, alias))
+            message_ids = [m["id"] for m in resp.get("messages", [])]
+            results.extend(self._batch_get_messages(service, message_ids, alias))
 
         return results

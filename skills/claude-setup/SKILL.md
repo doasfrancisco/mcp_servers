@@ -91,7 +91,9 @@ Ask if this is a **meta-repo** (multiple independent git repos in subfolders). I
 
 Populate the Repositories table by scanning top-level directories and asking the user to describe each.
 
-For meta-repos, also generate a `.gitignore` listing every folder from the Repositories table (one `folder/` per line).
+For meta-repos, also:
+- Generate a `.gitignore` listing every folder from the Repositories table (one `folder/` per line).
+- Create a `.meta-repo` marker file (`touch .meta-repo`) so the file picker knows to recurse into nested sub-repos.
 
 ## 4. Global Hooks
 

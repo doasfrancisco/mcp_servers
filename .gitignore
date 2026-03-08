@@ -17,6 +17,10 @@ mcps/whatsapp/chats_legacy.json
 mcps/whatsapp/tags.json
 mcps/whatsapp/messages/
 
+# GLPI
+mcps/glpi/.session.json
+mcps/glpi/.venv/
+
 # Node
 node_modules/
 build/

@@ -22,6 +22,14 @@ build_index() {
       dir="${dir%/}"
       [ -d "$dir/.git" ] || continue
       git -C "$dir" ls-files 2>/dev/null | sed "s|^|$dir/|"
+
+      # 3. If sub-repo is a meta-repo, index its sub-repos too
+      [ -f "$dir/.meta-repo" ] || continue
+      git -C "$dir" ls-files --others --ignored --exclude-standard 2>/dev/null | while read -r subdir; do
+        subdir="${subdir%/}"
+        [ -d "$dir/$subdir/.git" ] || continue
+        git -C "$dir/$subdir" ls-files 2>/dev/null | sed "s|^|$dir/$subdir/|"
+      done
     done
   } | sort > "$CACHE_FILE.tmp"
 
@@ -49,28 +57,33 @@ if [ -z "$query" ]; then
   exit 0
 fi
 
-# Build fuzzy pattern: "perso" → "p[^/]*e[^/]*r[^/]*s[^/]*o"
+# Build fuzzy patterns
+# Segment fuzzy: "perso" → "p[^/]*e[^/]*r[^/]*s[^/]*o" (within one path segment)
+# Global fuzzy:  "v6" → "v.*6" (anywhere in path, crosses segments)
 fuzzy=""
+gfuzzy=""
 for (( i=0; i<${#query}; i++ )); do
   c="${query:$i:1}"
-  # Escape regex special chars
   if [[ "$c" =~ [\.\^\$\*\+\?\\\{\}\(\)\|/\[\]] ]]; then
     c="\\$c"
   fi
   if [ $i -eq 0 ]; then
     fuzzy="$c"
+    gfuzzy="$c"
   else
     fuzzy="${fuzzy}[^/]*$c"
+    gfuzzy="${gfuzzy}.*$c"
   fi
 done
 
-# Sort helper: shorter paths first (shallower = more relevant)
-by_depth() { awk -F/ '{print NF, $0}' | sort -n | cut -d' ' -f2-; }
+# Sort helper: by depth, files before dirs at same depth
+by_depth() { awk -F/ '{d=($0 ~ /\/$/) ? 1 : 0; print NF, d, $0}' | sort -n -k1 -k2 | cut -d' ' -f3-; }
 
 # All searches use grep on pre-built cache files (fast, no loops)
 # Tiers are searched in order; within each tier, shallowest paths win.
 {
-  # Tier 1: segment starts with query (exact prefix) — dirs + files merged
+  # Tier 1: segment starts with query (exact prefix) — root dir first, then files, then dirs
+  grep -iE "(^|/)$query[^/]*/$" "$CACHE_DIRS" 2>/dev/null | by_depth | head -1
   { grep -iE "(^|/)$query" "$CACHE_DIRS" 2>/dev/null
     grep -iE "(^|/)$query" "$CACHE_FILE" 2>/dev/null
   } | by_depth | head -10
@@ -82,4 +95,9 @@ by_depth() { awk -F/ '{print NF, $0}' | sort -n | cut -d' ' -f2-; }
 
   # Tier 3: substring anywhere (fallback)
   grep -i "$query" "$CACHE_FILE" 2>/dev/null | by_depth | head -8
+
+  # Tier 4: global fuzzy (crosses segment boundaries, e.g. "v6" matches "alcance_v0_0_6.md")
+  { grep -iE "$gfuzzy" "$CACHE_DIRS" 2>/dev/null
+    grep -iE "$gfuzzy" "$CACHE_FILE" 2>/dev/null
+  } | by_depth | head -8
 } | awk '!seen[$0]++' | head -15

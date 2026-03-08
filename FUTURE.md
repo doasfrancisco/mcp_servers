@@ -4,6 +4,17 @@
 
 - **Save recurring Claude Code behaviors** — Track the most common tasks and workflows done from Claude Code (email triage, tag management, bulk operations, etc.). Save the behavior patterns so that in the future, OpenClaw can imitate and replay them autonomously without manual guidance.
 
+### Signal skill
+
+- **SessionStart hook for task context** — Add a global hook to `~/.claude/settings.json` that cats `~/.claude/signal/tasks.md` at session start, so every Claude Code session automatically knows what's in progress without needing `/signal`.
+
+```json
+{
+  "type": "command",
+  "command": "if [ -f ~/.claude/signal/tasks.md ]; then echo \"[Signal] Current tasks:\"; cat ~/.claude/signal/tasks.md; else echo \"[Signal] No tasks file found. Use /signal to set up tasks.\"; fi"
+}
+```
+
 ### Distribution
 
 - **Compile MCP servers to native binaries** — Use `bun build --compile` (JS/TS) or Nuitka/PyInstaller (Python) to ship MCP servers as standalone executables. Prevents users from reading source code while keeping everything running locally. Claude Code itself does this — its CLI is a Bun-compiled binary.
@@ -13,6 +24,7 @@
 - **Share MCP usage guide** — Document how to use the Dámelo Share MCP for exporting, importing, and sharing sessions with teams.
 - **Gmail: mailto unsubscribe** — Add mailto: support to `gmail_unsubscribe` (send an email to the unsubscribe address via Gmail API) for senders that don't support HTTP one-click.
 - **Gmail: improve tool discoverability** — Claude guesses wrong param names when calling tools it hasn't discovered via `ToolSearch` first (e.g. `message_ids` instead of `messages`, `tag` as top-level instead of per-message). Improve docstrings to be more explicit about the schema, or explore ways to make the tool signatures self-evident so even undiscovered calls are less error-prone.
+- **Gmail: reply support** — `send_message` doesn't support replying to threads. Need to accept optional `thread_id`/`message_id`, fetch the original `Message-ID` header, set `In-Reply-To`/`References`, and pass `threadId` in the send body.
 
 ### Gmail: tool consolidation
 

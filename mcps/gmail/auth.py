@@ -34,8 +34,11 @@ def load_credentials(account_alias: str) -> Credentials | None:
 
     creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
     if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-        token_path.write_text(creds.to_json())
+        try:
+            creds.refresh(Request())
+            token_path.write_text(creds.to_json())
+        except Exception:
+            return None
     return creds
 
 
