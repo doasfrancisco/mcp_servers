@@ -71,6 +71,9 @@ export function init() {
     try {
       unlinkSync(AUTH_MARKER);
     } catch {}
+    // Session expired — reconnect so next init() sees no marker and opens browser for QR
+    reconnectAttempts = 0;
+    reconnect();
   });
 
   client.on("ready", () => {
@@ -86,7 +89,9 @@ export function init() {
     reconnect();
   });
 
-  client.initialize();
+  client.initialize().catch((err) => {
+    console.error("[whatsapp] Initialize error:", err.message);
+  });
 
   return client;
 }

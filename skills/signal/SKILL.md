@@ -83,9 +83,15 @@ wt.exe -w 0 new-tab --title "<task name>" -p "PowerShell" -- pwsh.exe -NoExit -F
 
 The prompt should include all relevant context: what the task is, what repo, what "done" looks like, and any prior progress or decisions.
 
+If the task involves researching libraries, APIs, or external code, include this in the prompt:
+
+> Use /nia when you need to verify assumptions about libraries or APIs. Flow: first run list repos/docs to see what's indexed, then search packages or grep for the specific behavior you need to verify.
+
 When spawning, ALWAYS append to the prompt:
 
-> When you finish this task (success or failure), update today's task file in ~/.claude/signal/ (named YYYY-MM-DD-tasks.md) — find the relevant task line and change its state to (done) or (failed: reason). Update the "Updated:" date line too.
+> When you finish this task:
+> 1. Push your changes with git add . && git commit && git push.
+> 2. Update today's task file in ~/.claude/signal/ (named YYYY-MM-DD-tasks.md) — find the relevant task line and APPEND your context (root cause, what was done, what's left) after the existing text. Do NOT replace the original task description — keep it for traceability. Change the state to (done) or (failed: reason).
 
 ## Daily task files
 
