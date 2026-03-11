@@ -292,7 +292,7 @@ async function main() {
         await transports[sessionId].transport.handleRequest(req, res, req.body);
         return;
       }
-      if (!sessionId && isInitializeRequest(req.body)) {
+      if (isInitializeRequest(req.body)) {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (sid) => {

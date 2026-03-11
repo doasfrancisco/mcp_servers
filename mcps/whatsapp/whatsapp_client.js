@@ -212,24 +212,24 @@ export async function syncContacts() {
 
   // Only saved contacts. Skip entries with no valid id (malformed store data
   // causes whatsapp-web.js to throw "Data passed to getter must include an id").
-  const fresh = contacts
-    .filter((c) => c.id && c.isMyContact)
-    .flatMap((c) => {
-      try {
-        return [{
-          id: c.id._serialized,
-          name: c.name || null,
-          pushname: c.pushname || null,
-          number: c.number,
-          isMyContact: c.isMyContact,
-          isGroup: c.isGroup,
-          isUser: c.isUser,
-        }];
-      } catch (err) {
-        console.error(`[whatsapp] syncContacts: skipping malformed contact: ${err.message}`);
-        return [];
-      }
-    });
+  // Filter is inside flatMap because even property access on proxy objects can throw.
+  const fresh = contacts.flatMap((c) => {
+    try {
+      if (!c.id || !c.isMyContact) return [];
+      return [{
+        id: c.id._serialized,
+        name: c.name || null,
+        pushname: c.pushname || null,
+        number: c.number,
+        isMyContact: c.isMyContact,
+        isGroup: c.isGroup,
+        isUser: c.isUser,
+      }];
+    } catch (err) {
+      console.error(`[whatsapp] syncContacts: skipping malformed contact: ${err.message}`);
+      return [];
+    }
+  });
 
   const cached = readCache(CONTACTS_CACHE);
   if (!cached) {
@@ -278,10 +278,10 @@ export async function syncChats() {
   assertReady();
   const chats = await withReconnect(() => client.getChats());
 
-  const fresh = chats
-    .filter((c) => c.id)
-    .flatMap((c) => {
-      try {
+  // Filter inside flatMap — even .id access on proxy objects can throw.
+  const fresh = chats.flatMap((c) => {
+    try {
+      if (!c.id) return [];
         const chat = {
           id: c.id._serialized,
           name: c.name || null,
@@ -753,7 +753,7 @@ export async function findChat(query) {
         assertReady();
         console.error(`[whatsapp] findChat: cache hit for "${query}" → id=${match.id}, fetching live chats...`);
         const chats = await withReconnect(() => client.getChats());
-        const live = chats.find((c) => c.id._serialized === match.id);
+        const live = chats.find((c) => { try { return c.id._serialized === match.id; } catch { return false; } });
         if (!live) console.error(`[whatsapp] findChat: no live chat matched id=${match.id} (${chats.length} live chats)`);
         return live || null;
       }
@@ -765,11 +765,11 @@ export async function findChat(query) {
     const chats = await withReconnect(() => client.getChats());
     const q = query.toLowerCase();
 
-    let chat = chats.find(
-      (c) => c.name?.toLowerCase() === q || c.id._serialized === query || c.id.user === query
-    );
+    let chat = chats.find((c) => {
+      try { return c.name?.toLowerCase() === q || c.id._serialized === query || c.id.user === query; } catch { return false; }
+    });
     if (!chat) {
-      chat = chats.find((c) => c.name?.toLowerCase().includes(q));
+      chat = chats.find((c) => { try { return c.name?.toLowerCase().includes(q); } catch { return false; } });
     }
     return chat || null;
   } catch (err) {
@@ -832,11 +832,10 @@ export async function getGroupInfo(chat) {
     description: chat.description || null,
     participantCount: participants?.length || 0,
     participants:
-      participants?.map((p) => ({
-        id: p.id._serialized,
-        isAdmin: p.isAdmin,
-        isSuperAdmin: p.isSuperAdmin,
-      })) || [],
+      participants?.flatMap((p) => {
+        try { return [{ id: p.id._serialized, isAdmin: p.isAdmin, isSuperAdmin: p.isSuperAdmin }]; }
+        catch { return []; }
+      }) || [],
   };
 }
 
@@ -852,7 +851,7 @@ export async function replyToMessage(messageId, text) {
   const chats = await withReconnect(() => client.getChats());
   for (const chat of chats) {
     const messages = await withReconnect(() => chat.fetchMessages({ limit: 100 }));
-    const target = messages.find((m) => m.id._serialized === messageId);
+    const target = messages.find((m) => { try { return m.id._serialized === messageId; } catch { return false; } });
     if (target) {
       return await withReconnect(() => target.reply(text));
     }
@@ -865,7 +864,7 @@ export async function reactToMessage(messageId, emoji) {
   const chats = await withReconnect(() => client.getChats());
   for (const chat of chats) {
     const messages = await withReconnect(() => chat.fetchMessages({ limit: 100 }));
-    const target = messages.find((m) => m.id._serialized === messageId);
+    const target = messages.find((m) => { try { return m.id._serialized === messageId; } catch { return false; } });
     if (target) {
       return await withReconnect(() => target.react(emoji));
     }
@@ -878,7 +877,7 @@ export async function deleteMessage(messageId) {
   const chats = await withReconnect(() => client.getChats());
   for (const chat of chats) {
     const messages = await withReconnect(() => chat.fetchMessages({ limit: 100 }));
-    const target = messages.find((m) => m.id._serialized === messageId);
+    const target = messages.find((m) => { try { return m.id._serialized === messageId; } catch { return false; } });
     if (target) {
       return await withReconnect(() => target.delete(true));
     }
