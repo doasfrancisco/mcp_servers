@@ -3,6 +3,8 @@ const { Client, LocalAuth } = pkg;
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { execSync } from "child_process";
+import { platform } from "os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = join(__dirname, ".wwebjs_auth");
@@ -26,6 +28,35 @@ let reconnecting = false;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 3;
 
+// ── Orphan cleanup ────────────────────────────────────────────
+// On Windows, SIGTERM kills the process unconditionally — the graceful
+// shutdown handler never fires, leaving Puppeteer's Chrome alive.
+// On startup, find any Chrome with our .wwebjs_auth user-data-dir and kill it.
+
+export function killOrphanedChrome() {
+  try {
+    if (platform() === "win32") {
+      // Only match the root browser process (no --type= flag). taskkill /T kills its children.
+      const result = execSync(
+        'wmic process where "Name=\'chrome.exe\' AND CommandLine like \'%.wwebjs_auth%\' AND NOT CommandLine like \'%--type=%\'" get ProcessId /format:list',
+        { encoding: "utf-8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] }
+      ).trim();
+      const pids = result.match(/ProcessId=(\d+)/g)?.map((m) => m.split("=")[1]) || [];
+      for (const pid of pids) {
+        try {
+          execSync(`taskkill /PID ${pid} /T /F`, { timeout: 5000, stdio: "pipe" });
+          console.error(`[whatsapp] Killed orphaned Chrome tree (PID ${pid})`);
+        } catch {}
+      }
+    } else {
+      execSync(`pkill -f '.wwebjs_auth'`, { timeout: 5000, stdio: "pipe" });
+      console.error("[whatsapp] Killed orphaned Chrome processes");
+    }
+  } catch {
+    // No matching processes or command failed — both fine
+  }
+}
+
 // ── Init & auth ───────────────────────────────────────────────
 
 /**
@@ -36,6 +67,8 @@ const MAX_RECONNECT_ATTEMPTS = 3;
  */
 export function init() {
   if (client) return client;
+
+  killOrphanedChrome();
 
   const hasSession = existsSync(AUTH_MARKER);
   console.error(`[whatsapp] Session marker exists: ${hasSession}, headless: ${hasSession}`);
@@ -132,6 +165,14 @@ export function isReady() {
   return ready;
 }
 
+export async function destroy() {
+  if (client) {
+    await client.destroy();
+    client = null;
+    ready = false;
+  }
+}
+
 function assertReady() {
   if (reconnecting) {
     throw new Error("WhatsApp is reconnecting — try again in a few seconds.");
@@ -213,6 +254,7 @@ export async function syncContacts() {
   // Only saved contacts. Skip entries with no valid id (malformed store data
   // causes whatsapp-web.js to throw "Data passed to getter must include an id").
   // Filter is inside flatMap because even property access on proxy objects can throw.
+  const skippedEntries = [];
   const fresh = contacts.flatMap((c) => {
     try {
       if (!c.id || !c.isMyContact) return [];
@@ -226,7 +268,11 @@ export async function syncContacts() {
         isUser: c.isUser,
       }];
     } catch (err) {
-      console.error(`[whatsapp] syncContacts: skipping malformed contact: ${err.message}`);
+      // Capture whatever we can about the malformed entry
+      let info;
+      try { info = { name: c.name, pushname: c.pushname, number: c.number }; } catch { info = "unreadable"; }
+      skippedEntries.push({ error: err.message, info });
+      console.error(`[whatsapp] syncContacts: skipping malformed contact: ${err.message}`, info);
       return [];
     }
   });
@@ -234,7 +280,7 @@ export async function syncContacts() {
   const cached = readCache(CONTACTS_CACHE);
   if (!cached) {
     writeCache(CONTACTS_CACHE, fresh);
-    return { synced: fresh.length, added: fresh.length, changed: 0 };
+    return { synced: fresh.length, added: fresh.length, changed: 0, skipped: skippedEntries };
   }
 
   const cacheIndex = Object.fromEntries(cached.map((c) => [c.id, c]));
@@ -263,7 +309,7 @@ export async function syncContacts() {
   });
 
   writeCache(CONTACTS_CACHE, merged);
-  return { synced: merged.length, added, changed };
+  return { synced: merged.length, added, changed, skipped: skippedEntries };
 }
 
 /** Fields tracked for chat changes. */
@@ -279,6 +325,7 @@ export async function syncChats() {
   const chats = await withReconnect(() => client.getChats());
 
   // Filter inside flatMap — even .id access on proxy objects can throw.
+  const skippedEntries = [];
   const fresh = chats.flatMap((c) => {
     try {
       if (!c.id) return [];
@@ -323,7 +370,10 @@ export async function syncChats() {
 
         return [chat];
       } catch (err) {
-        console.error(`[whatsapp] syncChats: skipping malformed chat: ${err.message}`);
+        let info;
+        try { info = { name: c.name }; } catch { info = "unreadable"; }
+        skippedEntries.push({ error: err.message, info });
+        console.error(`[whatsapp] syncChats: skipping malformed chat: ${err.message}`, info);
         return [];
       }
     });
@@ -332,7 +382,7 @@ export async function syncChats() {
   if (!cached) {
     const result = { lastRefresh: new Date().toISOString(), data: fresh };
     writeCache(CHATS_CACHE, result);
-    return { synced: fresh.length, added: fresh.length, changed: 0, updated: 0 };
+    return { synced: fresh.length, added: fresh.length, changed: 0, updated: 0, updatedChats: [], skipped: skippedEntries };
   }
 
   const cacheIndex = Object.fromEntries(cached.data.map((c) => [c.id, c]));
@@ -369,7 +419,7 @@ export async function syncChats() {
 
   const result = { lastRefresh: new Date().toISOString(), data: merged };
   writeCache(CHATS_CACHE, result);
-  return { synced: merged.length, added, changed, updated: updatedChats.length, updatedChats };
+  return { synced: merged.length, added, changed, updated: updatedChats.length, updatedChats, skipped: skippedEntries };
 }
 
 /**
@@ -378,10 +428,19 @@ export async function syncChats() {
  */
 export async function syncAll() {
   assertReady();
-  const [contacts, chats] = await Promise.all([syncContacts(), syncChats()]);
+  const [contactsResult, chatsResult] = await Promise.allSettled([syncContacts(), syncChats()]);
+
+  const contacts = contactsResult.status === "fulfilled"
+    ? contactsResult.value
+    : { synced: 0, added: 0, changed: 0, skipped: [], error: contactsResult.reason?.stack || contactsResult.reason?.message };
+
+  const chats = chatsResult.status === "fulfilled"
+    ? chatsResult.value
+    : { synced: 0, added: 0, changed: 0, updated: 0, updatedChats: [], skipped: [], error: chatsResult.reason?.stack || chatsResult.reason?.message };
+
   return {
-    contacts: { synced: contacts.synced, added: contacts.added, changed: contacts.changed },
-    chats: { synced: chats.synced, added: chats.added, changed: chats.changed, updated: chats.updated, updatedChats: chats.updatedChats },
+    contacts: { synced: contacts.synced, added: contacts.added, changed: contacts.changed, skipped: contacts.skipped, error: contacts.error },
+    chats: { synced: chats.synced, added: chats.added, changed: chats.changed, updated: chats.updated, updatedChats: chats.updatedChats || [], skipped: chats.skipped, error: chats.error },
   };
 }
 

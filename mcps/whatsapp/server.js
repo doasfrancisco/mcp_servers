@@ -56,10 +56,14 @@ Returns stats on what was synced.`,
 
         // Default: sync contacts + chats
         const result = await wa.syncAll();
-        let text = `Contacts: ${result.contacts.synced} total, ${result.contacts.added} new, ${result.contacts.changed} changed.\nChats: ${result.chats.synced} total, ${result.chats.added} new, ${result.chats.changed} changed, ${result.chats.updated} updated.`;
+        let text = `Contacts: ${result.contacts.error ? "FAILED" : `${result.contacts.synced} total, ${result.contacts.added} new, ${result.contacts.changed} changed`}.\nChats: ${result.chats.error ? "FAILED" : `${result.chats.synced} total, ${result.chats.added} new, ${result.chats.changed} changed, ${result.chats.updated} updated`}.`;
         if (result.chats.updatedChats.length > 0) {
           text += `\n\nUpdated chats:\n${JSON.stringify(result.chats.updatedChats, null, 2)}`;
         }
+        if (result.contacts.skipped?.length > 0) text += `\n\nContacts skipped (${result.contacts.skipped.length}):\n${JSON.stringify(result.contacts.skipped, null, 2)}`;
+        if (result.chats.skipped?.length > 0) text += `\n\nChats skipped (${result.chats.skipped.length}):\n${JSON.stringify(result.chats.skipped, null, 2)}`;
+        if (result.contacts.error) text += `\n\nContacts error:\n${result.contacts.error}`;
+        if (result.chats.error) text += `\n\nChats error:\n${result.chats.error}`;
         return { content: [{ type: "text", text }] };
       } catch (err) {
         return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
@@ -362,3 +366,12 @@ main().catch((err) => {
   console.error("[whatsapp-mcp] Fatal:", err);
   process.exit(1);
 });
+
+// Shutdown — force-kill Chrome directly, no CDP round-trip that can hang
+function shutdown() {
+  console.error("[whatsapp-mcp] Shutting down...");
+  wa.killOrphanedChrome();
+  process.exit(0);
+}
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
