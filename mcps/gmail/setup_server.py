@@ -251,7 +251,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._redirect("/")
 
         elif path == "/finish":
+            if len(_accounts) == 1:
+                _save_config(_accounts[0]["alias"])
             self._respond(200, _finish_page())
+            if len(_accounts) == 1:
+                threading.Timer(0.5, _setup_complete.set).start()
 
         elif path == "/done":
             default = params.get("default", [_accounts[0]["alias"] if _accounts else ""])[0]

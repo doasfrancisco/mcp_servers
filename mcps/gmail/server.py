@@ -8,7 +8,7 @@ from typing import Annotated
 from fastmcp import FastMCP
 from pydantic import BaseModel, BeforeValidator, model_validator
 
-from gmail_client import GmailClient
+from gmail_client import BUILTIN_TAGS, GmailClient
 from setup_server import is_setup_complete, needs_setup, start_setup_server
 
 
@@ -24,16 +24,17 @@ class MessageRef(BaseModel):
     account: str
 
 
-BUILTIN_TAGS = {"important", "credentials", "contacts"}
 
-
-def _auto_prefix(tag: str | None) -> str | None:
-    """Prepend 'auto/' to custom tags so AI-sorted mail is easy to filter out."""
+def _ai_prefix(tag: str | None) -> str | None:
+    """Prepend 'ai/' to custom tags so AI-sorted mail is easy to filter out."""
     if tag is None:
         return None
-    if tag in BUILTIN_TAGS or tag.startswith("auto/"):
+    if tag in BUILTIN_TAGS or tag.startswith("ai/"):
         return tag
-    return f"auto/{tag}"
+    if "/" in tag:
+        # Strip any existing prefix (auto/, foo/, etc.) and re-add ai/
+        return f"ai/{tag.split('/', 1)[1]}"
+    return f"ai/{tag}"
 
 
 class TagOp(BaseModel):
@@ -44,7 +45,7 @@ class TagOp(BaseModel):
 
     @model_validator(mode="after")
     def _prefix_tags(self):
-        self.tag = _auto_prefix(self.tag)
+        self.tag = _ai_prefix(self.tag)
         return self
 
 
@@ -86,10 +87,10 @@ Tag system for organizing emails:
 Custom tags beyond these three are also supported and auto-created on first use.
 
 Auto-sorted emails:
-- Emails tagged with "auto/*" labels (e.g. "auto/finances") have already been reviewed and sorted by the AI.
-- gmail_search_messages automatically skips auto/* emails by default and returns their counts in "auto_skipped".
-- Always show the auto_skipped summary to the user (e.g. "Also sorted: auto/programming (1), auto/finances (3)").
-- When the user asks to "show all" or explicitly wants auto-sorted emails, set skip_auto=false.
+- Emails tagged with "ai/*" labels (e.g. "ai/finance") have already been reviewed and sorted by the AI.
+- gmail_search_messages automatically skips ai/* emails by default and returns their counts in "ai_skipped".
+- Always show the ai_skipped summary to the user (e.g. "Also sorted: ai/programming (1), ai/finance (3)").
+- When the user asks to "show all" or explicitly wants auto-sorted emails, set skip_ai=false.
 """,
 )
 
@@ -129,12 +130,12 @@ def gmail_search_messages(
     from_email: str | None = None,
     max_results: int = 200,
     account: str | None = None,
-    skip_auto: bool = True,
+    skip_ai: bool = True,
 ) -> str:
     """Search emails using Gmail query syntax.
 
-    By default, emails with auto/* tags are excluded from results and their counts
-    are returned in "auto_skipped". Set skip_auto=false to include everything.
+    By default, emails with ai/* tags are excluded from results and their counts
+    are returned in "ai_skipped". Set skip_ai=false to include everything.
 
     Args:
         query: Raw Gmail query string (e.g. "subject:invoice", "is:unread").
@@ -143,9 +144,9 @@ def gmail_search_messages(
         from_email: Filter by sender email address.
         max_results: Maximum number of results (default 50).
         account: Email or alias. Omit to search all accounts.
-        skip_auto: Exclude auto/* tagged emails from results (default true). Their counts are returned in auto_skipped.
+        skip_ai: Exclude ai/* tagged emails from results (default true). Their counts are returned in ai_skipped.
     """
-    return _json(_get_client().search_messages(query, date, from_email, max_results, account, skip_auto))
+    return _json(_get_client().search_messages(query, date, from_email, max_results, account, skip_ai))
 
 
 @mcp.tool()
@@ -328,7 +329,22 @@ def gmail_delete_tag(tag: str, account: str | None = None) -> str:
     Cannot delete "important" (maps to Gmail's STARRED system label).
 
     Args:
-        tag: Tag name to delete (e.g. "credentials", "auto/finances", or any custom tag).
+        tag: Tag name to delete (e.g. "credentials", "ai/finance", or any custom tag).
         account: Email or alias. Omit to delete from all accounts.
     """
     return _json(_get_client().delete_tag(tag, account))
+
+
+@mcp.tool()
+def gmail_rename_tag(old_tag: str, new_tag: str, account: str | None = None) -> str:
+    """STOP: Tell the user what you're about to rename and wait for confirmation.
+
+    Rename a tag (Gmail label). The ai/ prefix is auto-applied to new_tag for custom tags.
+    Cannot rename built-in tags (important, credentials, contacts).
+
+    Args:
+        old_tag: Current tag name to rename.
+        new_tag: New tag name. ai/ prefix is auto-applied for custom tags.
+        account: Email or alias. Omit to rename across all accounts.
+    """
+    return _json(_get_client().rename_tag(old_tag, _ai_prefix(new_tag), account))

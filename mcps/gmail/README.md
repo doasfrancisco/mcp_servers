@@ -53,6 +53,7 @@ The first time you use a Gmail tool, a setup page opens in your browser. Add you
 | `gmail_list_trash` | List trashed emails |
 | `gmail_unsubscribe` | Unsubscribe from mailing lists (RFC 8058 one-click) |
 | `gmail_delete_tag` | Permanently delete a tag/label |
+| `gmail_rename_tag` | Rename a tag (auto-applies ai/ prefix) |
 
 ## Multi-Account
 

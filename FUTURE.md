@@ -23,6 +23,7 @@
 
 - **Share MCP usage guide** — Document how to use the Dámelo Share MCP for exporting, importing, and sharing sessions with teams.
 - **Gmail: mailto unsubscribe** — Add mailto: support to `gmail_unsubscribe` (send an email to the unsubscribe address via Gmail API) for senders that don't support HTTP one-click.
+- **Gmail: migrate existing auto/ labels to ai/** — Users with existing `auto/*` labels from before the prefix rename need a migration path. Could be a one-time script or a note in the README to use `gmail_rename_tag`.
 - **Gmail: improve tool discoverability** — Claude guesses wrong param names when calling tools it hasn't discovered via `ToolSearch` first (e.g. `message_ids` instead of `messages`, `tag` as top-level instead of per-message). Improve docstrings to be more explicit about the schema, or explore ways to make the tool signatures self-evident so even undiscovered calls are less error-prone.
 - **Gmail: send-as alias management** — Add `gmail.settings.sharing` scope and a `gmail_config` tool to manage send-as aliases from the MCP (list, add, remove). Requires re-auth of affected accounts after adding the scope.
 - **Gmail: forward message** — Add `gmail_forward_message` tool. Forward an email to new recipients with proper `Fwd:` subject, quoted forwarded-message block (From/Date/Subject/To headers), HTML support, and threading headers. Currently users can't forward emails through the MCP at all. Inspired by GWS CLI's `+forward` command. See `docs/gmail-comparison-gws-cli.md`.

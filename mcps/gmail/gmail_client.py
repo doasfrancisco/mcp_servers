@@ -13,6 +13,8 @@ from googleapiclient.discovery import build
 
 from auth import load_credentials
 
+BUILTIN_TAGS = {"important", "credentials", "contacts"}
+
 # Date shorthand → Gmail query mapping
 _DATE_SHORTHANDS = {
     "today": "newer_than:1d",
@@ -238,12 +240,12 @@ class GmailClient:
         from_email: str | None = None,
         max_results: int = 50,
         account: str | None = None,
-        skip_auto: bool = True,
+        skip_ai: bool = True,
     ) -> dict:
         """Search emails. If account is None, searches all accounts.
 
-        When skip_auto=True, emails with auto/* labels are excluded from results
-        and their counts are returned in auto_skipped.
+        When skip_ai=True, emails with ai/* labels are excluded from results
+        and their counts are returned in ai_skipped.
         """
         gmail_query = self._build_query(query, date, from_email)
         aliases = [self._resolve_alias(account)] if account else self._get_all_aliases()
@@ -252,7 +254,7 @@ class GmailClient:
 
         for alias in aliases:
             service = self._get_service(alias)
-            if skip_auto:
+            if skip_ai:
                 label_maps[alias] = self._get_label_map(service)
             resp = (
                 service.users()
@@ -263,9 +265,9 @@ class GmailClient:
             message_ids = [m["id"] for m in resp.get("messages", [])]
             results.extend(self._batch_get_messages(service, message_ids, alias))
 
-        if not skip_auto:
+        if not skip_ai:
             self._mark_as_read(results)
-            return {"results": results, "auto_skipped": {}}
+            return {"results": results, "ai_skipped": {}}
 
         unsorted = []
         skipped_counts: dict[str, int] = {}
@@ -274,7 +276,7 @@ class GmailClient:
             auto_tags = [
                 label_map[lid]
                 for lid in msg.get("labelIds", [])
-                if lid in label_map and label_map[lid].lower().startswith("auto/")
+                if lid in label_map and label_map[lid].lower().startswith("ai/")
             ]
             if auto_tags:
                 for tag in auto_tags:
@@ -283,7 +285,7 @@ class GmailClient:
                 unsorted.append(msg)
 
         self._mark_as_read(unsorted)
-        return {"results": unsorted, "auto_skipped": skipped_counts}
+        return {"results": unsorted, "ai_skipped": skipped_counts}
 
     def read_message(self, message_id: str, account: str) -> dict:
         """Read a specific email by ID."""
@@ -414,7 +416,7 @@ class GmailClient:
         {"tag": "important", "description": "Starred emails — actionable, urgent, needs attention"},
         {"tag": "credentials", "description": "Passwords, API keys, server access, login details"},
         {"tag": "contacts", "description": "Emails from people you care about maintaining a relationship with"},
-        {"tag": "auto/finances", "description": "AI-sorted payments, receipts, invoices, and bank notifications"},
+        {"tag": "ai/finance", "description": "AI-sorted payments, receipts, invoices, and bank notifications"},
     ]
 
     def _resolve_tag_to_label_id(self, tag: str, service) -> str:
@@ -532,6 +534,43 @@ class GmailClient:
             results.append({"account": alias, "status": "deleted", "tag": tag})
 
         return {"tag": tag, "accounts": results}
+
+    def rename_tag(self, old_tag: str, new_tag: str, account: str | None = None) -> dict:
+        """Rename a tag (Gmail label) across one or all accounts.
+
+        Cannot rename built-in tags (important, credentials, contacts).
+        """
+        if old_tag.lower() in BUILTIN_TAGS:
+            return {"status": "error", "message": f"Cannot rename built-in tag '{old_tag}'."}
+
+        aliases = [self._resolve_alias(account)] if account else self._get_all_aliases()
+        results = []
+
+        for alias in aliases:
+            service = self._get_service(alias)
+            labels = service.users().labels().list(userId="me").execute().get("labels", [])
+            label_id = None
+            label_name = None
+            for label in labels:
+                if label["name"].lower() == old_tag.lower() and label.get("type") == "user":
+                    label_id = label["id"]
+                    label_name = label["name"]
+                    break
+
+            if label_id is None:
+                results.append({"account": alias, "status": "not_found"})
+                continue
+
+            if label_name == new_tag:
+                results.append({"account": alias, "status": "no_change"})
+                continue
+
+            service.users().labels().patch(
+                userId="me", id=label_id, body={"name": new_tag},
+            ).execute()
+            results.append({"account": alias, "status": "renamed", "old_tag": old_tag, "new_tag": new_tag})
+
+        return {"old_tag": old_tag, "new_tag": new_tag, "accounts": results}
 
     def untrash_message(self, message_id: str, account: str) -> dict:
         """Recover a message from trash."""
