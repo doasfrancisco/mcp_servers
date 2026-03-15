@@ -2,6 +2,16 @@
 
 Full Gmail control with multi-account support via FastMCP.
 
+## Install in Claude Desktop
+
+Download the extension and open it — Claude Desktop handles the rest:
+
+**[Download gmail-mcp-server.mcpb](https://github.com/doasfrancisco/mcp_servers/releases/latest/download/gmail-mcp-server.mcpb)** (requires [Claude Desktop](https://claude.ai/download))
+
+After installing, the first time you use a Gmail tool, a setup page opens in your browser to connect your Google accounts.
+
+> You'll need Google OAuth credentials first — see [step 1 below](#1-google-oauth-credentials-one-time).
+
 ## Setup
 
 ### 1. Google OAuth credentials (one-time)
