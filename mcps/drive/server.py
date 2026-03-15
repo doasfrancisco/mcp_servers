@@ -119,6 +119,7 @@ def drive_read_file(file: str) -> str:
     - Google Docs / Slides → plain text
     - Google Sheets → CSV (raw data)
     - Text files (< 5MB) → raw content
+    - Office documents (.docx) → extracted text (paragraphs and tables)
     - Binary files (images, PDFs, etc.) → metadata only (name, size, mimeType, webViewLink)
 
     Args:

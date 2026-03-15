@@ -21,6 +21,7 @@
 
 ### MCPs
 
+- **Drive: .xlsx/.pptx reading** — `_OFFICE_EXTRACTORS` dict in `drive_client.py` is ready for more formats. Add `openpyxl` for .xlsx and `python-pptx` for .pptx — each just needs an extractor function and a dict entry.
 - **Drive: upload files** — Add upload support to `drive_update_files` for pushing local files to Drive (binary uploads via `MediaFileUpload`). Currently `create` action only supports text content.
 - **Drive: permissions management** — Add ability to share files/folders with specific users, change permissions, or make files public.
 - **Share MCP usage guide** — Document how to use the Dámelo Share MCP for exporting, importing, and sharing sessions with teams.

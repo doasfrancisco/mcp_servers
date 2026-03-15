@@ -1,10 +1,15 @@
 """Google Drive API wrapper with multi-account support."""
 
+import io
 import json
 import re
 from pathlib import Path
 
+from docx import Document
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 
 from auth import load_credentials
 
@@ -28,6 +33,52 @@ TEXT_MIMES = {
 _ROLE_PRIORITY = {"owner": 3, "organizer": 2, "writer": 1, "commenter": 0, "reader": -1}
 
 MAX_TEXT_DOWNLOAD = 5 * 1024 * 1024  # 5MB
+
+
+def _download_file(service, file_id: str) -> bytes:
+    """Download file content using chunked streaming."""
+    request = service.files().get_media(fileId=file_id)
+    buffer = io.BytesIO()
+    downloader = MediaIoBaseDownload(buffer, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    return buffer.getvalue()
+
+
+def _extract_docx_text(data: bytes) -> str:
+    """Extract text from .docx bytes (headers, paragraphs, tables, footers)."""
+    doc = Document(io.BytesIO(data))
+    parts = []
+
+    def _extract_from_container(container):
+        for item in container.iter_inner_content():
+            if isinstance(item, Paragraph):
+                text = item.text.strip()
+                if text:
+                    parts.append(text)
+            elif isinstance(item, Table):
+                for row in item.rows:
+                    cells = [cell.text.strip() for cell in row.cells]
+                    parts.append("\t".join(cells))
+
+    # Headers
+    for section in doc.sections:
+        _extract_from_container(section.header)
+
+    # Body
+    _extract_from_container(doc)
+
+    # Footers
+    for section in doc.sections:
+        _extract_from_container(section.footer)
+
+    return "\n".join(parts)
+
+
+_OFFICE_EXTRACTORS = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": _extract_docx_text,
+}
 
 
 class AccountConfig:
@@ -278,13 +329,20 @@ class DriveClient:
         size = int(meta.get("size", 0))
         if _is_text_mime(mime) and size <= MAX_TEXT_DOWNLOAD:
             try:
-                content = service.files().get_media(fileId=file_id).execute()
-                if isinstance(content, bytes):
-                    result["content"] = content.decode("utf-8", errors="replace")
-                else:
-                    result["content"] = str(content)
+                content = _download_file(service, file_id)
+                result["content"] = content.decode("utf-8", errors="replace")
             except Exception as e:
                 result["content"] = f"[download failed: {e}]"
+            return result
+
+        # Office documents → download + extract text
+        extractor = _OFFICE_EXTRACTORS.get(mime)
+        if extractor and size <= MAX_TEXT_DOWNLOAD:
+            try:
+                data = _download_file(service, file_id)
+                result["content"] = extractor(data)
+            except Exception as e:
+                result["content"] = f"[extraction failed: {e}]"
             return result
 
         # Binary or too large
@@ -424,7 +482,6 @@ class DriveClient:
             body["parents"] = [parent_id]
 
         if content:
-            import io
             from googleapiclient.http import MediaIoBaseUpload
             media = MediaIoBaseUpload(
                 io.BytesIO(content.encode("utf-8")),
