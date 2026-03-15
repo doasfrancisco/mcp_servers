@@ -8,6 +8,10 @@
 mcps/gmail/credentials/*.json
 mcps/gmail/accounts.json
 
+# Drive MCP
+mcps/drive/credentials/*.json
+mcps/drive/accounts.json
+
 # WhatsApp session, cache & local data (contains secrets)
 mcps/whatsapp/.wwebjs_auth/
 mcps/whatsapp/.wwebjs_cache/

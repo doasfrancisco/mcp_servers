@@ -1,0 +1,7 @@
+{
+  "accounts": [
+    { "email": "john.doe@gmail.com", "alias": "personal" },
+    { "email": "john@acmecorp.com", "alias": "work" }
+  ],
+  "default": "personal"
+}

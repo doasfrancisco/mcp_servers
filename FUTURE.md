@@ -21,6 +21,8 @@
 
 ### MCPs
 
+- **Drive: upload files** — Add upload support to `drive_update_files` for pushing local files to Drive (binary uploads via `MediaFileUpload`). Currently `create` action only supports text content.
+- **Drive: permissions management** — Add ability to share files/folders with specific users, change permissions, or make files public.
 - **Share MCP usage guide** — Document how to use the Dámelo Share MCP for exporting, importing, and sharing sessions with teams.
 - **Gmail: mailto unsubscribe** — Add mailto: support to `gmail_unsubscribe` (send an email to the unsubscribe address via Gmail API) for senders that don't support HTTP one-click.
 - **Gmail: migrate existing auto/ labels to ai/** — Users with existing `auto/*` labels from before the prefix rename need a migration path. Could be a one-time script or a note in the README to use `gmail_rename_tag`.
