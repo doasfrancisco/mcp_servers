@@ -1,0 +1,49 @@
+{
+  "manifest_version": "0.4",
+  "name": "gmail-mcp-server",
+  "display_name": "Gmail",
+  "version": "1.0.0",
+  "description": "Full Gmail control with multi-account support — search, read, send, draft, tag, trash, and unsubscribe.",
+  "long_description": "MCP server for Gmail with multi-account support. Search emails, read messages and threads, send emails, create drafts, tag and organize with custom labels, trash/untrash, and unsubscribe from mailing lists. Includes a web-based setup flow that guides you through Google OAuth for each account — no manual JSON editing required.",
+  "author": {
+    "name": "Francisco"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/doasfrancisco/mcp-servers.git"
+  },
+  "server": {
+    "type": "uv",
+    "entry_point": "server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "--directory", "${__dirname}", "fastmcp", "run", "server.py"]
+    }
+  },
+  "tools": [
+    { "name": "gmail_search_messages", "description": "Search emails using Gmail query syntax with date shortcuts and per-account filtering" },
+    { "name": "gmail_read_message", "description": "Read a specific email by message ID" },
+    { "name": "gmail_read_thread", "description": "Read a full email thread by thread ID" },
+    { "name": "gmail_list_drafts", "description": "List draft emails" },
+    { "name": "gmail_create_draft", "description": "Create a new draft email" },
+    { "name": "gmail_send_message", "description": "Send an email or reply to a thread" },
+    { "name": "gmail_trash_messages", "description": "Trash emails across multiple accounts in one call" },
+    { "name": "gmail_tag_messages", "description": "Add, remove, or swap tags on emails" },
+    { "name": "gmail_get_tagged", "description": "Get emails by tag" },
+    { "name": "gmail_list_tags", "description": "List all available tags" },
+    { "name": "gmail_untrash_message", "description": "Recover an email from trash" },
+    { "name": "gmail_list_trash", "description": "List emails in trash" },
+    { "name": "gmail_unsubscribe", "description": "Unsubscribe from a mailing list via RFC 8058" },
+    { "name": "gmail_delete_tag", "description": "Permanently delete a tag" },
+    { "name": "gmail_rename_tag", "description": "Rename a tag" }
+  ],
+  "keywords": ["gmail", "email", "google", "multi-account", "oauth"],
+  "license": "MIT",
+  "privacy_policies": ["https://policies.google.com/privacy"],
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "python": ">=3.11"
+    }
+  }
+}

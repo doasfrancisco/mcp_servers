@@ -52,5 +52,8 @@ Thumbs.db
 # Logs
 *.log
 
+# Built artifacts
+*.mcpb
+
 # Windows
 *.stackdump

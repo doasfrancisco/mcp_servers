@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+credentials/
+accounts.json
+bash.exe.stackdump

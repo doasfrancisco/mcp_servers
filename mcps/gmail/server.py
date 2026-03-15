@@ -348,3 +348,7 @@ def gmail_rename_tag(old_tag: str, new_tag: str, account: str | None = None) -> 
         account: Email or alias. Omit to rename across all accounts.
     """
     return _json(_get_client().rename_tag(old_tag, _ai_prefix(new_tag), account))
+
+
+if __name__ == "__main__":
+    mcp.run()
