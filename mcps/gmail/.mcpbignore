@@ -2,6 +2,6 @@
 __pycache__/
 *.pyc
 *.egg-info/
-credentials/
+credentials/token_*.json
 accounts.json
 bash.exe.stackdump
