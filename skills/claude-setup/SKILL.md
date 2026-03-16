@@ -30,7 +30,20 @@ This creates `.claude/sounds/` and converts all audio files to `.wav` via ffmpeg
 
 ## 2. File Picker
 
-Copy the file suggestion script:
+**Option A — Centralized (preferred, if `github-repositories` exists on this machine):**
+
+Point the project's `.claude/settings.json` to the canonical script, passing the project root as `$1`:
+
+```json
+{
+  "fileSuggestion": {
+    "type": "command",
+    "command": "bash C:/Francisco/github-repositories/better_file_picker/file-suggestion.sh /path/to/project"
+  }
+}
+```
+
+**Option B — Standalone copy (for projects not on this machine):**
 
 ```bash
 mkdir -p .claude

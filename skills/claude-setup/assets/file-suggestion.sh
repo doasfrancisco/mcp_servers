@@ -1,37 +1,81 @@
 #!/bin/bash
 # Custom @ file picker for meta-repo with nested git repos.
-# Uses git index for speed: tracked files + recurse into ignored sub-repos.
-# Caches results; rebuilds every 60s in background.
+#
+# === ALGORITHM ===
+#
+# Phase 0: Project root resolution
+#   If $1 is provided, uses it as PROJECT_ROOT (for centralized usage from
+#   other projects). Otherwise, falls back to BASH_SOURCE[0] to resolve
+#   PROJECT_ROOT from the script's own location (.claude/file-suggestion.sh
+#   → parent dir). The fallback is immune to cwd drift caused by Claude Code's
+#   known working directory bug on Windows.
+#
+# Phase 1: Index (cached, rebuilds every 300s)
+#   git ls-files across all repos → index.txt (files) + dirs.txt (directories).
+#   Sub-repos discovered via .gitignore + .git check. Repos with .meta-repo
+#   marker get recursive sub-repo indexing. All sub-repos indexed in parallel.
+#   All git commands use -C PROJECT_ROOT to ensure correct scope.
+#
+# Phase 2: Search (every keystroke)
+#
+#   Tiered grep on cache. Each tier is fuzzier than the last:
+#     Tier 1: dir match → list ALL immediate children from cache (dir + files + subdirs)
+#     Tier 2: exact prefix on segment      (e.g. "cata" → catafract/CLAUDE.md)  10
+#     Tier 3: segment fuzzy                (c[^/]*a[^/]*t[^/]*a)                10
+#     Tier 4: substring anywhere           (literal "cata" in path)              8
+#     Tier 5: global fuzzy across segments (c.*a.*t.*a, crosses /)               8
+#   All results concatenated, deduped (first occurrence wins), head -15.
+#
+#   Tier 1 guarantees all subdirs of the matched directory always show.
+#   Tiers 2-5 fill remaining slots with broader matches.
+#
 
-PROJECT_HASH=$(pwd | md5sum | cut -d' ' -f1)
+PROJECT_ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+PROJECT_HASH=$(echo "$PROJECT_ROOT" | md5sum | cut -d' ' -f1)
 CACHE_DIR="${TMPDIR:-/tmp}/claude-file-suggestion-${PROJECT_HASH}"
 CACHE_FILE="$CACHE_DIR/index.txt"
 CACHE_DIRS="$CACHE_DIR/dirs.txt"
 CACHE_LOCK="$CACHE_DIR/lock"
-CACHE_TTL=60
+CACHE_TTL=300
 
 mkdir -p "$CACHE_DIR"
 
 build_index() {
-  {
-    # 1. Root repo tracked files
-    git ls-files 2>/dev/null
+  TMPOUT="$CACHE_DIR/parts"
+  mkdir -p "$TMPOUT"
+  rm -f "$TMPOUT"/*
 
-    # 2. Find ignored sub-repos and list their tracked files
-    git ls-files --others --ignored --exclude-standard 2>/dev/null | while read -r dir; do
-      dir="${dir%/}"
-      [ -d "$dir/.git" ] || continue
-      git -C "$dir" ls-files 2>/dev/null | sed "s|^|$dir/|"
+  # 1. Root repo tracked files (always from project root, not pwd)
+  git -C "$PROJECT_ROOT" ls-files 2>/dev/null > "$TMPOUT/root"
 
-      # 3. If sub-repo is a meta-repo, index its sub-repos too
-      [ -f "$dir/.meta-repo" ] || continue
-      git -C "$dir" ls-files --others --ignored --exclude-standard 2>/dev/null | while read -r subdir; do
-        subdir="${subdir%/}"
-        [ -d "$dir/$subdir/.git" ] || continue
-        git -C "$dir/$subdir" ls-files 2>/dev/null | sed "s|^|$dir/$subdir/|"
-      done
-    done
-  } | sort > "$CACHE_FILE.tmp"
+  # 2. Find ignored sub-repos (paths relative to PROJECT_ROOT)
+  repos=()
+  while read -r dir; do
+    dir="${dir%/}"
+    [ -d "$PROJECT_ROOT/$dir/.git" ] || continue
+    repos+=("$dir")
+  done < <(git -C "$PROJECT_ROOT" ls-files --others --ignored --exclude-standard 2>/dev/null)
+
+  # 3. Index all sub-repos in parallel
+  for dir in "${repos[@]}"; do
+    (
+      {
+        git -C "$PROJECT_ROOT/$dir" ls-files 2>/dev/null | sed "s|^|$dir/|"
+        # If sub-repo is a meta-repo, index its nested repos too
+        [ -f "$PROJECT_ROOT/$dir/.meta-repo" ] || exit 0
+        while read -r subdir; do
+          subdir="${subdir%/}"
+          [ -d "$PROJECT_ROOT/$dir/$subdir/.git" ] || continue
+          git -C "$PROJECT_ROOT/$dir/$subdir" ls-files 2>/dev/null | sed "s|^|$dir/$subdir/|"
+        done < <(git -C "$PROJECT_ROOT/$dir" ls-files --others --ignored --exclude-standard 2>/dev/null)
+      } > "$TMPOUT/$(echo "$dir" | tr '/' '_')"
+    ) &
+  done
+  wait
+
+  # Merge all parts
+  cat "$TMPOUT"/* 2>/dev/null | sort > "$CACHE_FILE.tmp"
+  rm -rf "$TMPOUT"
 
   # Pre-compute unique directories
   grep '/' "$CACHE_FILE.tmp" | sed 's|/[^/]*$||' | sort -u | sed 's|$|/|' > "$CACHE_DIRS.tmp"
@@ -53,7 +97,7 @@ fi
 query=$(cat | jq -r '.query // ""')
 
 if [ -z "$query" ]; then
-  ls -1p | head -15
+  ls -1p "$PROJECT_ROOT" | head -15
   exit 0
 fi
 
@@ -79,24 +123,29 @@ done
 # Sort helper: by depth, files before dirs at same depth
 by_depth() { awk -F/ '{d=($0 ~ /\/$/) ? 1 : 0; print NF, d, $0}' | sort -n -k1 -k2 | cut -d' ' -f3-; }
 
-# All searches use grep on pre-built cache files (fast, no loops)
-# Tiers are searched in order; within each tier, shallowest paths win.
 {
-  # Tier 1: segment starts with query (exact prefix) — root dir first, then files, then dirs
-  grep -iE "(^|/)$query[^/]*/$" "$CACHE_DIRS" 2>/dev/null | by_depth | head -1
+  # Tier 1: if query matches a dir, list its immediate contents from cache
+  top_dir=$(grep -iE "(^|/)$query[^/]*/$" "$CACHE_DIRS" 2>/dev/null | by_depth | head -1)
+  if [ -n "$top_dir" ]; then
+    echo "$top_dir"
+    grep -E "^${top_dir}[^/]+$" "$CACHE_FILE" 2>/dev/null
+    grep -E "^${top_dir}[^/]+/$" "$CACHE_DIRS" 2>/dev/null
+  fi
+
+  # Tier 2: exact prefix match on segment
   { grep -iE "(^|/)$query" "$CACHE_DIRS" 2>/dev/null
     grep -iE "(^|/)$query" "$CACHE_FILE" 2>/dev/null
   } | by_depth | head -10
 
-  # Tier 2: fuzzy match on segment — dirs + files merged
+  # Tier 3: fuzzy match within segment
   { grep -iE "(^|/)$fuzzy" "$CACHE_DIRS" 2>/dev/null
     grep -iE "(^|/)$fuzzy" "$CACHE_FILE" 2>/dev/null
   } | by_depth | head -10
 
-  # Tier 3: substring anywhere (fallback)
+  # Tier 4: substring anywhere (fallback)
   grep -i "$query" "$CACHE_FILE" 2>/dev/null | by_depth | head -8
 
-  # Tier 4: global fuzzy (crosses segment boundaries, e.g. "v6" matches "alcance_v0_0_6.md")
+  # Tier 5: global fuzzy across segments (e.g. "v6" matches "alcance_v0_0_6.md")
   { grep -iE "$gfuzzy" "$CACHE_DIRS" 2>/dev/null
     grep -iE "$gfuzzy" "$CACHE_FILE" 2>/dev/null
   } | by_depth | head -8
