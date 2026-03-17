@@ -23,13 +23,18 @@ const DEFAULT_TAGS = {
 };
 
 let client = null;
-let ready = false;
-let reconnecting = false;
-let reconnectAttempts = 0;
 let readyTimer = null;
 const MAX_RECONNECT_ATTEMPTS = 3;
 const READY_TIMEOUT_MS = 30_000;
 const DESTROY_TIMEOUT_MS = 10_000;
+const RECONNECT_DEBOUNCE_MS = 5_000;
+
+// Explicit state machine — replaces the old boolean flags (ready, reconnecting)
+// that had race conditions when multiple disconnect triggers fired simultaneously.
+const State = { INITIALIZING: "INITIALIZING", READY: "READY", RECONNECTING: "RECONNECTING", DEAD: "DEAD" };
+let state = State.INITIALIZING;
+let reconnectAttempts = 0;
+let lastReconnectTime = 0;
 
 // ── Orphan cleanup ────────────────────────────────────────────
 // On Windows, SIGTERM kills the process unconditionally — the graceful
@@ -94,7 +99,7 @@ export function init() {
       console.error("[whatsapp] QR received in headless mode — session expired, reconnecting with browser...");
       try { unlinkSync(AUTH_MARKER); } catch {}
       reconnectAttempts = 0;
-      reconnect();
+      reconnect("qr_expired");
       return;
     }
     console.error("[whatsapp] QR code received — scan with your phone");
@@ -110,44 +115,49 @@ export function init() {
     // If ready doesn't fire within 30s after auth, stores are hung — retry
     clearTimeout(readyTimer);
     readyTimer = setTimeout(() => {
-      if (!ready) {
+      if (state !== State.READY) {
         console.error("[whatsapp] Ready timeout — authenticated but stores never loaded, retrying");
-        reconnect();
+        reconnect("ready_timeout");
       }
     }, READY_TIMEOUT_MS);
   });
 
   client.on("auth_failure", (msg) => {
     console.error("[whatsapp] Auth failure:", msg);
-    ready = false;
     try {
       unlinkSync(AUTH_MARKER);
     } catch {}
     // Session expired — reconnect so next init() sees no marker and opens browser for QR
     reconnectAttempts = 0;
-    reconnect();
+    reconnect("auth_failure");
   });
 
   client.on("ready", () => {
     console.error("[whatsapp] Client ready");
     clearTimeout(readyTimer);
-    ready = true;
-    reconnecting = false;
+    state = State.READY;
     reconnectAttempts = 0;
+    lastReconnectTime = 0;
+  });
+
+  // Log state transitions for debugging — helps diagnose what happens before a disconnect.
+  client.on("change_state", (waState) => {
+    console.error(`[whatsapp] State changed: ${waState}`);
   });
 
   client.on("disconnected", (reason) => {
     console.error("[whatsapp] Disconnected:", reason);
-    ready = false;
-    reconnect();
+    // The library already calls this.destroy() after emitting 'disconnected',
+    // so we pass the source to avoid double-destroying.
+    reconnect("disconnected_event");
   });
 
   client.initialize().catch((err) => {
     console.error("[whatsapp] Initialize error:", err.message);
     // Only retry if we had a valid session — if QR was needed, don't loop
-    if (!ready && existsSync(AUTH_MARKER)) {
+    if (state !== State.READY && existsSync(AUTH_MARKER)) {
       console.error("[whatsapp] Initialize failed with valid session — retrying");
-      reconnect();
+      reconnect("initialize_error");
     }
   });
 
@@ -158,42 +168,69 @@ export function init() {
  * Destroy the current client and reinitialize.
  * Capped at MAX_RECONNECT_ATTEMPTS consecutive failures to avoid infinite loops.
  * Counter resets on successful `ready` event.
+ *
+ * @param {string} source — identifies the caller to handle double-destroy correctly:
+ *   - "disconnected_event": library already called destroy(), skip our destroy
+ *   - anything else: we initiate the destroy ourselves
+ *
+ * Debounce: a single disconnect fires multiple handlers (withReconnect catches the
+ * error, library emits 'disconnected', ready timeout fires). The state guard and
+ * timestamp debounce ensure only one reconnect cycle runs per disconnect event.
  */
-async function reconnect() {
-  if (reconnecting) return;
+async function reconnect(source = "unknown") {
+  // Already reconnecting or permanently dead — skip
+  if (state === State.RECONNECTING || state === State.DEAD) {
+    console.error(`[whatsapp] Reconnect skipped (state=${state}, source=${source})`);
+    return;
+  }
+
+  // Debounce: if we just started a reconnect cycle, skip duplicate triggers
+  const now = Date.now();
+  if (now - lastReconnectTime < RECONNECT_DEBOUNCE_MS) {
+    console.error(`[whatsapp] Reconnect debounced (${now - lastReconnectTime}ms since last, source=${source})`);
+    return;
+  }
 
   reconnectAttempts++;
   if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
     console.error(`[whatsapp] Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached — giving up. Restart the MCP server manually.`);
-    reconnecting = false;
+    state = State.DEAD;
     return;
   }
 
-  reconnecting = true;
+  state = State.RECONNECTING;
+  lastReconnectTime = now;
   clearTimeout(readyTimer);
-  console.error(`[whatsapp] Reconnecting (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+  console.error(`[whatsapp] Reconnecting (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}, source=${source})...`);
 
   if (client) {
-    try {
-      await Promise.race([
-        client.destroy(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("destroy timeout")), DESTROY_TIMEOUT_MS)),
-      ]);
-    } catch (err) {
-      // Graceful destroy failed or timed out — force-kill Chrome
-      console.error(`[whatsapp] Graceful destroy failed: ${err.message} — force-killing Chrome`);
+    if (source === "disconnected_event") {
+      // The library already called this.destroy() (without await) after emitting
+      // 'disconnected'. Give it a moment to close Chrome, then force-kill stragglers.
+      await new Promise((r) => setTimeout(r, 2000));
       killOrphanedChrome();
+    } else {
+      try {
+        await Promise.race([
+          client.destroy(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("destroy timeout")), DESTROY_TIMEOUT_MS)),
+        ]);
+      } catch (err) {
+        // Graceful destroy failed or timed out — force-kill Chrome
+        console.error(`[whatsapp] Graceful destroy failed: ${err.message} — force-killing Chrome`);
+        killOrphanedChrome();
+      }
     }
     client = null;
   }
 
-  ready = false;
-  reconnecting = false; // clear before init() so init() doesn't see stale flag
+  // State stays RECONNECTING — init() sets up the client and handlers,
+  // the 'ready' event will transition state to READY.
   init();
 }
 
 export function isReady() {
-  return ready;
+  return state === State.READY;
 }
 
 export async function destroy() {
@@ -201,30 +238,30 @@ export async function destroy() {
   if (client) {
     await client.destroy();
     client = null;
-    ready = false;
+    state = State.DEAD;
   }
 }
 
 function assertReady() {
-  if (reconnecting) {
-    throw new Error(
-      `WhatsApp is reconnecting (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}) — try again in ~15 seconds.`
-    );
-  }
-  if (!ready && reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-    throw new Error(
-      "WhatsApp reconnection failed after all retries. Restart the MCP server to recover."
-    );
-  }
-  if (!ready && client) {
-    throw new Error(
-      "WhatsApp client is initializing — try again in ~15 seconds."
-    );
-  }
-  if (!ready) {
-    throw new Error(
-      "WhatsApp client is not running. Restart the MCP server."
-    );
+  switch (state) {
+    case State.READY:
+      return;
+    case State.RECONNECTING:
+      throw new Error(
+        `WhatsApp is reconnecting (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}) — try again in ~15 seconds.`
+      );
+    case State.DEAD:
+      throw new Error(
+        "WhatsApp reconnection failed after all retries. Restart the MCP server to recover."
+      );
+    case State.INITIALIZING:
+      throw new Error(
+        "WhatsApp client is initializing — try again in ~15 seconds."
+      );
+    default:
+      throw new Error(
+        "WhatsApp client is not running. Restart the MCP server."
+      );
   }
 }
 
@@ -248,13 +285,12 @@ async function withReconnect(fn) {
     const msg = err.message || "";
     if (msg === "API call timeout") {
       console.error("[whatsapp] API call timed out — Chrome may be unresponsive, reconnecting");
-      ready = false;
-      reconnect();
+      reconnect("api_timeout");
       throw new Error("WhatsApp API timed out — reconnecting. Try again in ~30 seconds.");
     }
-    if (msg.includes("detached Frame") || msg.includes("Session closed")) {
+    if (msg.includes("detached Frame") || msg.includes("Session closed") || msg.includes("Execution context was destroyed")) {
       console.error("[whatsapp] Detached frame detected — triggering reconnect");
-      reconnect();
+      reconnect("detached_frame");
       throw new Error("WhatsApp session lost — reconnecting. Try again in ~15 seconds.");
     }
     if (msg.includes("is not a function") || msg.includes("Cannot read properties")) {
@@ -854,11 +890,13 @@ export function getContactTags(contact) {
 
 /**
  * Find a chat by name or phone number.
- * Searches cached chats first; falls back to API only if cache is empty.
+ * Resolves name → id from cache, then fetches the single live chat object via
+ * getChatById() (one lightweight Puppeteer call) instead of getChats() which
+ * serializes ALL chats. Falls back to getChats() only when cache is empty.
  */
 export async function findChat(query) {
   try {
-    // Try cache first
+    // Try cache first — resolve name to id locally
     const cached = readCache(CHATS_CACHE);
     if (cached) {
       const q = query.toLowerCase();
@@ -868,19 +906,18 @@ export async function findChat(query) {
         (c) => c.name?.toLowerCase().includes(q)
       );
       if (match) {
-        // Need the live chat object for fetchMessages
+        // Fetch the single live chat object by id — one Puppeteer call, not all chats
         assertReady();
-        console.error(`[whatsapp] findChat: cache hit for "${query}" → id=${match.id}, fetching live chats...`);
-        const chats = await withReconnect(() => client.getChats());
-        const live = chats.find((c) => { try { return c.id._serialized === match.id; } catch { return false; } });
-        if (!live) console.error(`[whatsapp] findChat: no live chat matched id=${match.id} (${chats.length} live chats)`);
+        console.error(`[whatsapp] findChat: cache hit for "${query}" → id=${match.id}`);
+        const live = await withReconnect(() => client.getChatById(match.id));
+        if (!live) console.error(`[whatsapp] findChat: getChatById returned nothing for id=${match.id}`);
         return live || null;
       }
     }
 
-    // No cache or no match — fall back to API
+    // No cache or no match — fall back to full getChats() (rare: only when cache is empty)
     assertReady();
-    console.error(`[whatsapp] findChat: cache miss for "${query}", falling back to API...`);
+    console.error(`[whatsapp] findChat: cache miss for "${query}", falling back to getChats()...`);
     const chats = await withReconnect(() => client.getChats());
     const q = query.toLowerCase();
 
@@ -907,16 +944,26 @@ export async function getChatMessages(chat, limit = 50) {
   const messages = await withReconnect(() => chat.fetchMessages({ limit }));
   console.error(`[whatsapp] getChatMessages: got ${messages.length} msgs, resolving contacts...`);
 
-  // Cache contacts we resolve to avoid repeated lookups for the same sender.
+  // Resolve sender names from local contacts cache first (no API calls),
+  // falling back to msg.getContact() only for unknown senders.
   // In group chats msg.from is the group id — use msg.author (individual sender) instead.
+  const mentionMap = getMentionMap();
   const contactCache = {};
   const formatted = [];
   for (const msg of messages) {
     try {
       const senderId = msg.author || msg.from;
       if (!contactCache[senderId]) {
-        const contact = await withReconnect(() => msg.getContact());
-        contactCache[senderId] = contact.pushname || contact.name || senderId;
+        // Try cache first — the number portion of senderId maps to a name
+        const num = senderId.split("@")[0];
+        const cachedName = mentionMap[num];
+        if (cachedName) {
+          contactCache[senderId] = cachedName;
+        } else {
+          // Cache miss — fall back to API (rare for known contacts)
+          const contact = await withReconnect(() => msg.getContact());
+          contactCache[senderId] = contact.pushname || contact.name || senderId;
+        }
       }
       formatted.push({
         id: msg.id._serialized,
@@ -967,39 +1014,21 @@ export async function sendMessage(chatId, text) {
 
 export async function replyToMessage(messageId, text) {
   assertReady();
-  const chats = await withReconnect(() => client.getChats());
-  for (const chat of chats) {
-    const messages = await withReconnect(() => chat.fetchMessages({ limit: 100 }));
-    const target = messages.find((m) => { try { return m.id._serialized === messageId; } catch { return false; } });
-    if (target) {
-      return await withReconnect(() => target.reply(text));
-    }
-  }
-  throw new Error(`Message ${messageId} not found`);
+  const target = await withReconnect(() => client.getMessageById(messageId));
+  if (!target) throw new Error(`Message ${messageId} not found`);
+  return await withReconnect(() => target.reply(text));
 }
 
 export async function reactToMessage(messageId, emoji) {
   assertReady();
-  const chats = await withReconnect(() => client.getChats());
-  for (const chat of chats) {
-    const messages = await withReconnect(() => chat.fetchMessages({ limit: 100 }));
-    const target = messages.find((m) => { try { return m.id._serialized === messageId; } catch { return false; } });
-    if (target) {
-      return await withReconnect(() => target.react(emoji));
-    }
-  }
-  throw new Error(`Message ${messageId} not found`);
+  const target = await withReconnect(() => client.getMessageById(messageId));
+  if (!target) throw new Error(`Message ${messageId} not found`);
+  return await withReconnect(() => target.react(emoji));
 }
 
 export async function deleteMessage(messageId) {
   assertReady();
-  const chats = await withReconnect(() => client.getChats());
-  for (const chat of chats) {
-    const messages = await withReconnect(() => chat.fetchMessages({ limit: 100 }));
-    const target = messages.find((m) => { try { return m.id._serialized === messageId; } catch { return false; } });
-    if (target) {
-      return await withReconnect(() => target.delete(true));
-    }
-  }
-  throw new Error(`Message ${messageId} not found`);
+  const target = await withReconnect(() => client.getMessageById(messageId));
+  if (!target) throw new Error(`Message ${messageId} not found`);
+  return await withReconnect(() => target.delete(true));
 }

@@ -160,11 +160,21 @@ Path: `.wwebjs_auth/.authenticated`
 
 ```js
 let client = null;           // The whatsapp-web.js Client instance
-let ready = false;           // True only after 'ready' event fires
-let reconnecting = false;    // True during reconnect(), prevents re-entry
-let reconnectAttempts = 0;   // Consecutive failures, resets on 'ready'
 let readyTimer = null;       // setTimeout ID for ready timeout after auth
+
+// Explicit state machine — replaces the old boolean flags (ready, reconnecting)
+// that had race conditions when multiple disconnect triggers fired simultaneously.
+const State = { INITIALIZING, READY, RECONNECTING, DEAD };
+let state = State.INITIALIZING;
+let reconnectAttempts = 0;   // Consecutive failures, resets on 'ready'
+let lastReconnectTime = 0;   // Timestamp debounce to coalesce concurrent triggers
 ```
+
+Transitions:
+- `init()` called → `INITIALIZING`
+- `ready` event → `READY` (resets `reconnectAttempts` and `lastReconnectTime`)
+- `reconnect()` called → `RECONNECTING` (stays until `ready` fires or max attempts exceeded)
+- Max attempts exceeded → `DEAD`
 
 ### Event: `qr`
 
@@ -200,9 +210,9 @@ client.on("authenticated", () => {
   // START READY TIMEOUT — if 'ready' doesn't fire within 30s, stores are hung
   clearTimeout(readyTimer);
   readyTimer = setTimeout(() => {
-    if (!ready) {
+    if (state !== State.READY) {
       console.error("[whatsapp] Ready timeout — stores never loaded, retrying");
-      reconnect();
+      reconnect("ready_timeout");
     }
   }, READY_TIMEOUT_MS);  // 30_000
 });
@@ -216,14 +226,13 @@ Fires when session restoration fails (corrupted session data, etc.).
 
 ```js
 client.on("auth_failure", (msg) => {
-  ready = false;
   unlinkSync(AUTH_MARKER);      // Force QR on next attempt
   reconnectAttempts = 0;        // Reset — need fresh auth
-  reconnect();
+  reconnect("auth_failure");
 });
 ```
 
-**Note:** whatsapp-web.js also calls `this.destroy()` and possibly `this.initialize()` internally on auth failure (Client.js:151-156). Our `reconnect()` calls `client.destroy()` again — the second destroy is safe (checks `isConnected()` first).
+**Note:** whatsapp-web.js also calls `this.destroy()` and possibly `this.initialize()` internally on auth failure (Client.js:151-156). Our `reconnect("auth_failure")` initiates its own destroy — safe because the state machine prevents re-entry.
 
 ### Event: `ready`
 
@@ -231,14 +240,24 @@ Fires when WhatsApp Web is fully loaded — stores injected, event listeners att
 
 ```js
 client.on("ready", () => {
-  clearTimeout(readyTimer);     // Cancel the ready timeout
-  ready = true;                 // THE flag that gates all tool calls
-  reconnecting = false;
+  clearTimeout(readyTimer);
+  state = State.READY;          // THE transition that gates all tool calls
   reconnectAttempts = 0;        // Reset consecutive failure counter
+  lastReconnectTime = 0;        // Reset debounce so future reconnects aren't blocked
 });
 ```
 
-**This is the only place `ready` becomes `true`.** Everything gates on this.
+**This is the only place `state` becomes `READY`.** Everything gates on this via `assertReady()`.
+
+### Event: `change_state`
+
+Fires on every WhatsApp Web state transition (CONNECTED, OPENING, TIMEOUT, etc.). Logged for debugging — helps trace what happened before a disconnect.
+
+```js
+client.on("change_state", (waState) => {
+  console.error(`[whatsapp] State changed: ${waState}`);
+});
+```
 
 ### Event: `disconnected`
 
@@ -246,8 +265,7 @@ Fires when WhatsApp Web enters a non-accepted state.
 
 ```js
 client.on("disconnected", (reason) => {
-  ready = false;
-  reconnect();
+  reconnect("disconnected_event");
 });
 ```
 
@@ -267,46 +285,53 @@ if (!ACCEPTED_STATES.includes(state)) {
 
 States that trigger disconnect: `CONFLICT`, `DEPRECATED_VERSION`, `PROXYBLOCK`, `SMB_TOS_BLOCK`, `TOS_BLOCK`, `UNLAUNCHED`, `UNPAIRED`, `UNPAIRED_IDLE`.
 
-**Edge case:** The library calls `this.destroy()` without `await` after emitting `disconnected`. Our handler also calls `reconnect()` which calls `client.destroy()`. So `destroy()` may be called twice — safe because the second call sees `isConnected() === false` and skips `browser.close()`.
+**Double-destroy prevention:** The library calls `this.destroy()` without `await` after emitting `disconnected`. Our handler passes `source="disconnected_event"` so `reconnect()` skips calling `client.destroy()` again — instead it waits 2s for the library's destroy to finish, then force-kills any remaining Chrome processes.
 
 ## 4. Reconnection
 
-### `reconnect()` (whatsapp_client.js:162)
+### `reconnect(source)` (whatsapp_client.js:180)
 
 ```js
-async function reconnect() {
-  if (reconnecting) return;                    // Re-entry guard
+async function reconnect(source = "unknown") {
+  // State guard — replaces the old boolean `reconnecting` flag
+  if (state === State.RECONNECTING || state === State.DEAD) return;
+
+  // Timestamp debounce — a single disconnect fires multiple handlers
+  // (withReconnect, disconnected event, ready timeout). Only let one through.
+  if (Date.now() - lastReconnectTime < RECONNECT_DEBOUNCE_MS) return;
 
   reconnectAttempts++;
-  if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {   // 3
-    console.error("[whatsapp] Max reconnect attempts reached — giving up");
-    reconnecting = false;
-    return;                                    // Dead state — only server restart recovers
+  if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+    state = State.DEAD;         // Only server restart recovers
+    return;
   }
 
-  reconnecting = true;
-  clearTimeout(readyTimer);
+  state = State.RECONNECTING;   // Stays RECONNECTING until 'ready' fires
+  lastReconnectTime = Date.now();
 
   if (client) {
-    try {
-      await Promise.race([
-        client.destroy(),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("destroy timeout")), DESTROY_TIMEOUT_MS)  // 10s
-        ),
-      ]);
-    } catch (err) {
-      // Graceful destroy failed or timed out — force-kill Chrome
+    if (source === "disconnected_event") {
+      // Library already called destroy() — wait briefly, then force-kill stragglers
+      await sleep(2000);
       killOrphanedChrome();
+    } else {
+      // We initiate the destroy ourselves
+      try {
+        await Promise.race([client.destroy(), timeout(DESTROY_TIMEOUT_MS)]);
+      } catch {
+        killOrphanedChrome();
+      }
     }
     client = null;
   }
 
-  ready = false;
-  reconnecting = false;   // Clear BEFORE init() so init() doesn't see stale flag
-  init();                  // Creates new client, starts new Chrome
+  init();   // State stays RECONNECTING — 'ready' event transitions to READY
 }
 ```
+
+**Source parameter:** Each caller identifies itself so `reconnect()` can handle the double-destroy case. When `source="disconnected_event"`, the library already started destroying Chrome — we skip our own `destroy()` call and just force-kill stragglers after a brief wait.
+
+**Debounce:** Prevents a single disconnect from burning multiple retry attempts. The `lastReconnectTime` check rejects duplicate triggers within 5 seconds. Resets on successful `ready`.
 
 ### What `client.destroy()` does (whatsapp-web.js Client.js:878)
 
@@ -433,17 +458,13 @@ withReconnect(fn)
 
 ```js
 function assertReady() {
-  if (reconnecting)
-    → "WhatsApp is reconnecting (attempt N/3) — try again in ~15 seconds."
-
-  if (!ready && reconnectAttempts >= MAX_RECONNECT_ATTEMPTS)
-    → "WhatsApp reconnection failed after all retries. Restart the MCP server to recover."
-
-  if (!ready && client)
-    → "WhatsApp client is initializing — try again in ~15 seconds."
-
-  if (!ready)
-    → "WhatsApp client is not running. Restart the MCP server."
+  switch (state) {
+    case State.READY:        return;  // OK
+    case State.RECONNECTING: → "WhatsApp is reconnecting (attempt N/3) — try again in ~15 seconds."
+    case State.DEAD:         → "WhatsApp reconnection failed after all retries. Restart the MCP server."
+    case State.INITIALIZING: → "WhatsApp client is initializing — try again in ~15 seconds."
+    default:                 → "WhatsApp client is not running. Restart the MCP server."
+  }
 }
 ```
 
