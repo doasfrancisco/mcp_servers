@@ -124,9 +124,20 @@ class GmailClient:
         except Exception:
             return raw
 
+    @staticmethod
+    def _has_attachments(payload: dict) -> bool:
+        """Check if any part in the payload has a filename (i.e. is an attachment)."""
+        for part in payload.get("parts", []):
+            if part.get("filename"):
+                return True
+            if GmailClient._has_attachments(part):
+                return True
+        return False
+
     def _format_message(self, msg: dict, alias: str) -> dict:
         """Extract useful fields from a Gmail API message resource."""
-        headers = {h["name"].lower(): h["value"] for h in msg.get("payload", {}).get("headers", [])}
+        payload = msg.get("payload", {})
+        headers = {h["name"].lower(): h["value"] for h in payload.get("headers", [])}
         return {
             "id": msg["id"],
             "threadId": msg.get("threadId"),
@@ -137,6 +148,7 @@ class GmailClient:
             "date": self._localize_date(headers.get("date", "")),
             "snippet": msg.get("snippet", ""),
             "labelIds": msg.get("labelIds", []),
+            "has_attachments": self._has_attachments(payload),
         }
 
     def _get_body(self, payload: dict) -> str:
@@ -164,6 +176,9 @@ class GmailClient:
             attachments.extend(self._get_attachments_list(part))
         return attachments
 
+    # Only fetch the fields needed for search results (headers + part filenames for has_attachments)
+    _LIST_FIELDS = "id,threadId,labelIds,snippet,payload/headers,payload/parts/filename"
+
     def _batch_get_messages(self, service, message_ids: list[str], alias: str) -> list[dict]:
         """Fetch message metadata in batches of 1000 using Gmail's batch API."""
         fetched: list[dict] = []
@@ -177,8 +192,8 @@ class GmailClient:
             for msg_id in message_ids[i:i + 1000]:
                 batch.add(
                     service.users().messages().get(
-                        userId="me", id=msg_id, format="metadata",
-                        metadataHeaders=["From", "To", "Subject", "Date"],
+                        userId="me", id=msg_id, format="full",
+                        fields=self._LIST_FIELDS,
                     )
                 )
             batch.execute()
