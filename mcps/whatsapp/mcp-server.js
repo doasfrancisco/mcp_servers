@@ -84,6 +84,31 @@ const MEDIA_LABELS = {
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+/** Convert a UTC ISO string to local timezone display string. */
+function toLocalTime(utcISO) {
+  if (!utcISO) return null;
+  const dt = new Date(utcISO);
+  const h = dt.getHours();
+  const m = dt.getMinutes().toString().padStart(2, "0");
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 || 12;
+  const month = MONTH_NAMES[dt.getMonth()];
+  const day = dt.getDate();
+  return `${month} ${day}, ${h12}:${m} ${ampm}`;
+}
+
+/** Convert timestamps in find results to local timezone for display. */
+function localizeResults(results) {
+  return results.map((r) => {
+    const out = { ...r };
+    if (out.timestamp) out.timestamp = toLocalTime(out.timestamp);
+    if (out.lastMessage?.timestamp) {
+      out.lastMessage = { ...out.lastMessage, timestamp: toLocalTime(out.lastMessage.timestamp) };
+    }
+    return out;
+  });
+}
+
 function formatMessages(messages, chatName, mentionMap = {}) {
   const lines = [];
   let lastDate = "";
@@ -116,6 +141,7 @@ function formatMessages(messages, chatName, mentionMap = {}) {
     const label = MEDIA_LABELS[m.type];
     if (label && m.type !== "chat") {
       if (m.type === "document" && body) body = `[${body}]`;
+      else if (m.type === "image" || m.type === "video" || m.type === "sticker") body = label;
       else body = body ? `${label} ${body}` : label;
     }
 
@@ -184,13 +210,36 @@ Returns stats on what was synced.`,
 
           const results = [];
           for (const name of chatNames) {
-            const resolved = cache.resolveContact(name);
+            // Resolve via chats cache first (has @lid IDs that Chat store recognizes),
+            // then fall back to contacts cache (has @c.us IDs).
+            // This mirrors the old whatsapp-web.js findChat() approach.
+            const resolved = cache.resolveChatByName(name) || cache.resolveContact(name);
             if (!resolved) {
               results.push({ chat: name, error: "not found" });
               continue;
             }
 
-            const messages = await callRenderer("getMessages", [resolved.id, 200]);
+            // Fetch in growing batches until we've reached past the cutoff date
+            // (same approach as old whatsapp-web.js syncMessages)
+            let messages = [];
+            let batch = 50;
+            const MAX_BATCH = 1000;
+            while (batch <= MAX_BATCH) {
+              messages = await callRenderer("getMessages", [resolved.id, batch]);
+              if (messages.length === 0 || messages.length < batch) break;
+              // messages[0] is the oldest (chronological order)
+              if (messages[0].timestamp <= cutoffISO) break;
+              batch *= 2;
+            }
+
+            // Resolve sender names to address book names (same as legacy).
+            // inject.js returns pushnames from senderObj; mentionMap has address book names.
+            const mentionMap = cache.getMentionMap();
+            for (const m of messages) {
+              const num = (m.from || "").split("@")[0];
+              if (num && mentionMap[num]) m.sender = mentionMap[num];
+            }
+
             const filtered = messages.filter((m) => m.timestamp >= cutoffISO);
             const mergeResult = cache.mergeMessages(resolved.id, filtered);
             results.push({ chat: resolved.name, id: resolved.id, synced: filtered.length, ...mergeResult });
@@ -245,7 +294,7 @@ When no params are given, defaults to today's activity only.`,
           if (mapped) {
             results = cache.find({ tag: mapped, from, filter });
             if (results.length > 0) {
-              return { content: [{ type: "text", text: `No contact named "${query}", but found results via the "${mapped}" tag:\n${JSON.stringify(results, null, 2)}` }] };
+              return { content: [{ type: "text", text: `No contact named "${query}", but found results via the "${mapped}" tag:\n${JSON.stringify(localizeResults(results), null, 2)}` }] };
             }
           }
         }
@@ -256,7 +305,7 @@ When no params are given, defaults to today's activity only.`,
             : "No results found. The cache may be empty — use whatsapp_sync first.";
           return { content: [{ type: "text", text: reason }] };
         }
-        return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(localizeResults(results), null, 2) }] };
       } catch (err) {
         return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
       }
@@ -343,7 +392,7 @@ Always confirm with the user before sending.`,
     },
     async ({ chat: query, message }) => {
       try {
-        const resolved = cache.resolveContact(query);
+        const resolved = cache.resolveChatByName(query) || cache.resolveContact(query);
         if (!resolved) {
           return { content: [{ type: "text", text: `No contact found matching "${query}". Sync contacts first.` }] };
         }

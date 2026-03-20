@@ -36,10 +36,13 @@ export function writeCache(path, data) {
 
 // ── Mention map ───────────────────────────────────────────────
 
-/** Build a number → contact name map for resolving @mentions. */
+/** Build a number → contact name map for resolving @mentions.
+ *  Maps both phone numbers (@c.us) and internal IDs (@lid) so mentions resolve regardless of format. */
 export function getMentionMap() {
-  const contacts = readCache(CONTACTS_CACHE) || [];
   const map = {};
+
+  // From contacts cache (@c.us entries with phone numbers)
+  const contacts = readCache(CONTACTS_CACHE) || [];
   for (const c of contacts) {
     const name = c.name || c.pushname || null;
     if (!name) continue;
@@ -47,7 +50,34 @@ export function getMentionMap() {
     if (num && !map[num]) map[num] = name;
     if (c.number && !map[c.number]) map[c.number] = name;
   }
+
+  // From chats cache (@lid entries that contacts cache doesn't have)
+  const chatCache = readCache(CHATS_CACHE);
+  if (chatCache?.data) {
+    for (const c of chatCache.data) {
+      if (!c.name || c.id.endsWith("@g.us") || c.id.endsWith("@broadcast")) continue;
+      const num = c.id.split("@")[0];
+      if (num && !map[num]) map[num] = c.name;
+    }
+  }
+
   return map;
+}
+
+// ── Chat resolution (by name, from chats cache) ──────────────
+// The chats cache has the actual IDs the Chat store uses (@lid or @g.us).
+// This mirrors the old whatsapp-web.js findChat() which searched chats by name first.
+
+/** Resolve a chat name to { id, name } using the chats cache. Exact match only. */
+export function resolveChatByName(query) {
+  const chats = readCache(CHATS_CACHE);
+  if (!chats?.data) return null;
+  const q = query.toLowerCase();
+
+  const exact = chats.data.find((c) => c.name?.toLowerCase() === q || c.id === query);
+  if (exact) return { id: exact.id, name: exact.name };
+
+  return null;
 }
 
 // ── Contact resolution ────────────────────────────────────────
