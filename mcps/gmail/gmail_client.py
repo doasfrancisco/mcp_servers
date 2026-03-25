@@ -609,7 +609,6 @@ class GmailClient:
         self,
         tag: str,
         date: str | None = None,
-        max_results: int = 50,
         account: str | None = None,
     ) -> list[dict]:
         """Get messages with a specific tag, optionally filtered by date."""
@@ -624,7 +623,7 @@ class GmailClient:
             resp = (
                 service.users()
                 .messages()
-                .list(userId="me", q=full_query, maxResults=max_results)
+                .list(userId="me", q=full_query)
                 .execute()
             )
             message_ids = [m["id"] for m in resp.get("messages", [])]

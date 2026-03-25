@@ -354,7 +354,6 @@ def gmail_tag_messages(messages: TagOpList) -> str:
 def gmail_get_tagged(
     tag: str,
     date: str | None = None,
-    max_results: int = 50,
     account: str | None = None,
 ) -> str:
     """Get emails by tag. Use for viewing auto-sorted emails (ai/finance, ai/promotions, etc.)
@@ -363,10 +362,9 @@ def gmail_get_tagged(
     Args:
         tag: Tag name — "ai/finance", "important", "credentials", "contacts", or any custom tag.
         date: Date filter — "today", "yesterday", "last_7d", "last_30d". Omit for all time.
-        max_results: Maximum number of results (default 50).
         account: Email or alias. Omit to get from all accounts.
     """
-    return _json(_get_client().get_tagged(tag, date, max_results, account))
+    return _json(_get_client().get_tagged(tag, date, account=account))
 
 
 @mcp.tool()
