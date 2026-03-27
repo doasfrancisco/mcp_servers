@@ -93,7 +93,7 @@ Auto-sorted emails:
 - To see auto-sorted emails, use gmail_get_tagged("ai/finance") — NOT gmail_search_messages.
 
 Search defaults:
-- Always use the default max_results (200). Do not override it.
+- Always use the default max_results (100). Do not override it.
 
 Attachments:
 - When gmail_read_message downloads attachments, immediately read them using the Read tool — do NOT ask the user first. The "hint" field in each attachment tells you the file path to read.
@@ -136,7 +136,7 @@ async def gmail_search_messages(
     ctx: Context,
     query: str | None = None,
     from_email: str | None = None,
-    max_results: int = 200,
+    max_results: int = 100,
     account: str | None = None,
 ) -> str:
     """Search emails. Auto-sorted emails (ai/*) are excluded — use gmail_get_tagged to see them.
@@ -145,7 +145,7 @@ async def gmail_search_messages(
         query: Gmail search query. Supports all Gmail operators including date filters
             (e.g. "newer_than:1d", "after:2026/03/25", "subject:invoice is:unread").
         from_email: Filter by sender email address.
-        max_results: Always use the default (200). Do not override.
+        max_results: Always use the default (100). Do not override.
         account: Email or alias. Omit to search all accounts.
     """
     if account:

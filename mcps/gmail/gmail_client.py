@@ -267,7 +267,7 @@ class GmailClient:
         self,
         query: str | None = None,
         from_email: str | None = None,
-        max_results: int = 200,
+        max_results: int = 100,
         account: str | None = None,
     ) -> dict:
         """Search emails. If account is None, searches all accounts.
