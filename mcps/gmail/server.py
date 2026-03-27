@@ -1,9 +1,21 @@
 """Gmail MCP Server — full Gmail control with multi-account support."""
 
 import json
+import logging
 import webbrowser
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Annotated
+
+# 5 MB per file, keep current + 1 backup = 10 MB max
+_log_dir = Path(__file__).parent / "logs"
+_log_dir.mkdir(exist_ok=True)
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    handlers=[RotatingFileHandler(_log_dir / "gmail.log", maxBytes=5_000_000, backupCount=1)],
+)
 
 from fastmcp import Context, FastMCP
 from pydantic import BaseModel, BeforeValidator, model_validator
@@ -132,6 +144,68 @@ def _json(data) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False)
 
 
+def _extract_sender_name(from_header: str) -> str:
+    """Extract display name from 'Name <email>' or return email."""
+    if "<" in from_header:
+        return from_header.split("<")[0].strip().strip('"')
+    return from_header
+
+
+def _label_badges(label_ids: list[str]) -> str:
+    """Turn labelIds into readable badges."""
+    badges = []
+    for lid in label_ids:
+        if lid == "UNREAD":
+            badges.append("🔵 unread")
+        elif lid == "STARRED":
+            badges.append("⭐ starred")
+        elif lid == "IMPORTANT":
+            badges.append("❗ important")
+        elif lid not in ("INBOX", "SENT", "CATEGORY_PERSONAL", "CATEGORY_UPDATES",
+                         "CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CATEGORY_FORUMS"):
+            badges.append(lid.lower())
+    return " · ".join(badges)
+
+
+def _format_search_md(data: dict) -> str:
+    """Format search results as markdown grouped by account."""
+    results = data.get("results", [])
+    ai_skipped = data.get("ai_skipped", {})
+
+    if not results and not ai_skipped:
+        return "No emails found."
+
+    # Group by account
+    grouped: dict[str, list[dict]] = {}
+    for msg in results:
+        grouped.setdefault(msg["account"], []).append(msg)
+
+    lines: list[str] = []
+    for acct, msgs in grouped.items():
+        lines.append(f"### {acct} ({len(msgs)})")
+        lines.append("")
+        for i, msg in enumerate(msgs, 1):
+            sender = _extract_sender_name(msg["from"])
+            subj = msg["subject"] or "(no subject)"
+            att = " [attachment]" if msg.get("has_attachments") else ""
+            badges = _label_badges(msg.get("labelIds", []))
+            badge_str = f" [{badges}]" if badges else ""
+            lines.append(f"{i}. **{sender}** — {subj}{att}{badge_str}")
+            lines.append(f"   To: {msg.get('to', '')}")
+            lines.append(f"   {msg['date']} · id:`{msg['id']}` · thread:`{msg.get('threadId', '')}`")
+            snippet = msg.get("snippet", "")
+            if snippet:
+                lines.append(f"   > {snippet}")
+            lines.append("")
+        lines.append("")
+
+    if ai_skipped:
+        parts = [f"{tag} ({count})" for tag, count in ai_skipped.items()]
+        lines.append(f"Also sorted: {', '.join(parts)}")
+
+    return "\n".join(lines)
+
+
 @mcp.tool()
 async def gmail_search_messages(
     ctx: Context,
@@ -157,10 +231,11 @@ async def gmail_search_messages(
         )
         if response.action != "accept":
             account = None
-    return _json(_get_client().search_messages(
+    data = _get_client().search_messages(
         query=query, from_email=from_email,
         max_results=max_results, account=account,
-    ))
+    )
+    return _format_search_md(data)
 
 
 _BINARY_EXTENSIONS = {".xlsx", ".xls", ".pptx", ".doc", ".zip", ".rar", ".7z", ".tar", ".gz"}

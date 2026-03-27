@@ -2,6 +2,7 @@
 
 import base64
 import json
+import logging
 import mimetypes
 import re
 import urllib.request
@@ -14,8 +15,11 @@ import docx
 import pdfplumber
 
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from auth import load_credentials
+
+log = logging.getLogger(__name__)
 
 BUILTIN_TAGS = {"important", "credentials", "contacts"}
 
@@ -192,24 +196,62 @@ class GmailClient:
     # Only fetch the fields needed for search results (headers + part filenames for has_attachments)
     _LIST_FIELDS = "id,threadId,labelIds,snippet,payload/headers,payload/parts/filename"
 
+    _BATCH_SIZE = 50  # Google recommends ≤50 to avoid 429 concurrency limits
+
     def _batch_get_messages(self, service, message_ids: list[str], alias: str) -> list[dict]:
-        """Fetch message metadata in batches of 1000 using Gmail's batch API."""
+        """Fetch message metadata in batches using Gmail's batch API.
+
+        Uses batches of 50 (Google's recommendation) to stay under
+        per-user concurrency limits. Failed fetches are retried once
+        individually.
+        """
         fetched: list[dict] = []
+        failed_ids: list[str] = []
 
         def _callback(request_id, response, exception):
             if exception is None:
                 fetched.append(self._format_message(response, alias))
+            else:
+                log.warning("Batch GET failed for %s/%s: %s", alias, request_id, exception)
+                failed_ids.append(request_id)
 
-        for i in range(0, len(message_ids), 1000):
+        for i in range(0, len(message_ids), self._BATCH_SIZE):
             batch = service.new_batch_http_request(callback=_callback)
-            for msg_id in message_ids[i:i + 1000]:
+            for msg_id in message_ids[i:i + self._BATCH_SIZE]:
                 batch.add(
                     service.users().messages().get(
                         userId="me", id=msg_id, format="full",
                         fields=self._LIST_FIELDS,
-                    )
+                    ),
+                    request_id=msg_id,
                 )
             batch.execute()
+
+        # Retry failed messages as a batch first
+        if failed_ids:
+            retry_ids = failed_ids
+            failed_ids = []
+            batch = service.new_batch_http_request(callback=_callback)
+            for msg_id in retry_ids:
+                batch.add(
+                    service.users().messages().get(
+                        userId="me", id=msg_id, format="full",
+                        fields=self._LIST_FIELDS,
+                    ),
+                    request_id=msg_id,
+                )
+            batch.execute()
+
+        # Last resort: retry remaining failures individually
+        for msg_id in failed_ids:
+            try:
+                resp = service.users().messages().get(
+                    userId="me", id=msg_id, format="full",
+                    fields=self._LIST_FIELDS,
+                ).execute()
+                fetched.append(self._format_message(resp, alias))
+            except HttpError as e:
+                log.error("Retry also failed for %s/%s: %s", alias, msg_id, e)
 
         return fetched
 
@@ -283,14 +325,23 @@ class GmailClient:
         for alias in aliases:
             service = self._get_service(alias)
             label_maps[alias] = self._get_label_map(service)
-            resp = (
-                service.users()
-                .messages()
-                .list(userId="me", q=gmail_query or None, maxResults=max_results)
-                .execute()
-            )
-            message_ids = [m["id"] for m in resp.get("messages", [])]
-            results.extend(self._batch_get_messages(service, message_ids, alias))
+            message_ids: list[str] = []
+            page_token = None
+            while True:
+                resp = (
+                    service.users()
+                    .messages()
+                    .list(
+                        userId="me", q=gmail_query or None,
+                        maxResults=max_results, pageToken=page_token,
+                    )
+                    .execute()
+                )
+                message_ids.extend(m["id"] for m in resp.get("messages", []))
+                page_token = resp.get("nextPageToken")
+                if not page_token or len(message_ids) >= max_results:
+                    break
+            results.extend(self._batch_get_messages(service, message_ids[:max_results], alias))
 
         unsorted = []
         skipped_counts: dict[str, int] = {}
