@@ -7,6 +7,7 @@ import mimetypes
 import re
 import urllib.request
 from email.message import EmailMessage
+from html.parser import HTMLParser
 from email.utils import parsedate_to_datetime
 from io import BytesIO
 from pathlib import Path
@@ -158,14 +159,48 @@ class GmailClient:
         }
 
     def _get_body(self, payload: dict) -> str:
-        """Recursively extract the text body from a message payload."""
-        if payload.get("mimeType") == "text/plain" and payload.get("body", {}).get("data"):
-            return base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8", errors="replace")
+        """Recursively extract the text body from a message payload.
 
+        Prefers text/plain. Falls back to text/html with tags stripped
+        (many marketing/transactional emails only include HTML).
+        """
+        plain = self._get_body_by_mime(payload, "text/plain")
+        if plain:
+            return plain
+        html = self._get_body_by_mime(payload, "text/html")
+        if html:
+            return self._strip_html(html)
+        return ""
+
+    @staticmethod
+    def _strip_html(html: str) -> str:
+        """Strip HTML to readable text using HTMLParser."""
+        # Remove style/script blocks before parsing
+        html = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL)
+        html = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL)
+
+        class _Stripper(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.convert_charrefs = True
+                self.text: list[str] = []
+
+            def handle_data(self, data):
+                self.text.append(data)
+
+        s = _Stripper()
+        s.feed(html)
+        return re.sub(r"\s+", " ", "".join(s.text)).strip()
+
+    @staticmethod
+    def _get_body_by_mime(payload: dict, mime_type: str) -> str:
+        """Recursively find a body part matching the given MIME type."""
+        if payload.get("mimeType") == mime_type and payload.get("body", {}).get("data"):
+            return base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8", errors="replace")
         for part in payload.get("parts", []):
-            body = self._get_body(part)
-            if body:
-                return body
+            result = GmailClient._get_body_by_mime(part, mime_type)
+            if result:
+                return result
         return ""
 
     @staticmethod
