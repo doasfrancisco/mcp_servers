@@ -92,10 +92,6 @@ Auto-sorted emails:
 - Always show the ai_skipped summary to the user (e.g. "Also sorted: ai/programming (1), ai/finance (3)").
 - To see auto-sorted emails, use gmail_get_tagged("ai/finance") — NOT gmail_search_messages.
 
-Date filtering:
-- ALWAYS use the date parameter for date filtering: "today", "yesterday", "last_7d", "last_30d".
-- NEVER put date expressions (after:, before:, newer_than:, older_than:) in the query parameter — it will error.
-
 Attachments:
 - When gmail_read_message downloads attachments, immediately read them using the Read tool — do NOT ask the user first. The "hint" field in each attachment tells you the file path to read.
 - Reading is not a write operation — no confirmation needed.
@@ -135,7 +131,6 @@ def _json(data) -> str:
 @mcp.tool()
 async def gmail_search_messages(
     ctx: Context,
-    date: str | None = None,
     query: str | None = None,
     from_email: str | None = None,
     max_results: int = 200,
@@ -144,8 +139,8 @@ async def gmail_search_messages(
     """Search emails. Auto-sorted emails (ai/*) are excluded — use gmail_get_tagged to see them.
 
     Args:
-        date: REQUIRED for date filtering. Use: "today", "yesterday", "last_7d", "last_30d".
-        query: Gmail filters like "subject:invoice", "is:unread", "from:boss". NOT for dates.
+        query: Gmail search query. Supports all Gmail operators including date filters
+            (e.g. "newer_than:1d", "after:2026/03/25", "subject:invoice is:unread").
         from_email: Filter by sender email address.
         max_results: Maximum number of results (default 200).
         account: Email or alias. Omit to search all accounts.
@@ -157,7 +152,7 @@ async def gmail_search_messages(
         if response.action != "accept":
             account = None
     return _json(_get_client().search_messages(
-        query=query, date=date, from_email=from_email,
+        query=query, from_email=from_email,
         max_results=max_results, account=account,
     ))
 
