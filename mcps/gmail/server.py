@@ -216,6 +216,7 @@ async def gmail_search_messages(
 ) -> str:
     """Search emails. Call immediately when user asks to show/check email — no planning needed.
     Auto-sorted emails (ai/*) are excluded — use gmail_get_tagged to see them.
+    Returns markdown-formatted results.
 
     Args:
         query: Gmail search query. Defaults to "newer_than:1d" (today's emails).
