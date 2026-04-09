@@ -11,11 +11,12 @@ Safely commit and push the current changes. Every run follows this exact sequenc
 
 Run `git status` to see what will be staged. Review the actual file list for:
 
-- Files that contain or look like secrets (`.env`, `.pem`, `.key`, credentials, tokens)
-- Unexpectedly large binary files or data dumps
-- Files that should be gitignored but aren't
+- **Secrets** — `.env`, `.pem`, `.key`, credentials, tokens, API keys
+- **Internal data** — data dumps, migration exports, board exports, JSON/CSV with names/tasks/internal info, database exports. Any folder that looks like a one-off dump (e.g. `*-migration/`, `*-export/`, `*-dump/`) is a red flag.
+- **Large binaries** — blobs, images, compiled files that don't belong in git
+- **Files that should be gitignored** — check if the repo is public, and whether the file contains anything that shouldn't be on GitHub
 
-Only stop if you find a **real problem** — an actual sensitive file that would be committed. Do NOT theorize about what .gitignore *could* be missing. If every file in the diff is safe, move on silently.
+Only stop if you find a **real problem**. Do NOT theorize about what .gitignore *could* be missing — check the actual files. If every file in the diff is safe, move on silently.
 
 ## 3. Stage everything
 
