@@ -28,6 +28,7 @@
       "cache.js",
       "icon.png",
       "icon.ico",
+      "icon_48x48.png",
       "node_modules/**/*"
     ],
     "extraResources": []

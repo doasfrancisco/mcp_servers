@@ -42,6 +42,7 @@
       SocketModel: "WAWebSocketModel",
       FindChat: "WAWebFindChatAction",
       WidFactory: "WAWebWidFactory",
+      DBMessageFind: "WAWebDBMessageFindLocal",
     };
 
     for (const [key, moduleName] of Object.entries(extras)) {
@@ -101,9 +102,16 @@
       if (!store) throw new Error("Chat store not available");
 
       const wid = modules.WidFactory?.createWid ? modules.WidFactory.createWid(chatId) : chatId;
-      return store.get(wid) || store.get(chatId)
-        || (await modules.FindChat?.findOrCreateLatestChat?.(wid))?.chat
-        || null;
+
+      // Prefer findOrCreateLatestChat — it fully hydrates the chat so
+      // chat.msgs has all recent messages. Chat.get() returns a shell
+      // with only the sidebar preview message.
+      try {
+        const result = await modules.FindChat?.findOrCreateLatestChat?.(wid);
+        if (result?.chat) return result.chat;
+      } catch {}
+
+      return store.get(wid) || store.get(chatId) || null;
     }
 
     api.getContacts = () => {
@@ -207,89 +215,97 @@
         .filter(Boolean);
     };
 
-    function serializeMessages(models, limit = null) {
-      const selected = limit == null ? models : models.slice(-limit);
-      return selected
-        .map((m) => {
-          try {
-            const authorId = m.author?._serialized || m.author;
-            const fromId = m.from?._serialized || m.from;
-            const senderId = authorId || fromId;
-            const senderName = m.senderObj?.pushname || m.senderObj?.name || senderId;
-
-            const msgType = m.type || "chat";
-            let body = m.body || "";
-            if (msgType !== "chat" && body.startsWith("/9j/")) {
-              body = "";
-            }
-
-            return {
-              id: m.id._serialized || m.id.toString(),
-              sender: senderName,
-              from: senderId,
-              body,
-              timestamp: m.t ? new Date(m.t * 1000).toISOString() : null,
-              type: msgType,
-              hasMedia: m.isMedia || false,
-              isForwarded: m.isForwarded || false,
-              hasQuotedMsg: !!m.quotedMsg,
-            };
-          } catch { return null; }
-        })
-        .filter(Boolean);
+    // Convert raw DB results to Msg store models
+    function toMsgModels(rawMessages) {
+      const MsgStore = modules.Msg;
+      if (!MsgStore) return rawMessages;
+      const out = [];
+      for (const m of rawMessages) {
+        if (m && typeof m.serialize === "function") { out.push(m); continue; }
+        const serialized = m?.id?._serialized || (typeof m === "string" ? m : null);
+        let model = (serialized && MsgStore.get(serialized))
+          || (m?.id && MsgStore.get(m.id._serialized || m.id))
+          || null;
+        if (!model && m && MsgStore.modelClass) {
+          try { model = new MsgStore.modelClass(m); } catch {}
+        }
+        if (model) out.push(model);
+      }
+      return out;
     }
 
-    api.getMessages = async (chatId, count = 50, options = {}) => {
+    // Serialize a message model for IPC
+    function serializeMsg(m) {
+      try {
+        const authorId = m.author?._serialized || m.author;
+        const fromId = m.from?._serialized || m.from;
+        const senderId = authorId || fromId;
+        const senderName = m.senderObj?.pushname || m.senderObj?.name || senderId;
+        const msgType = m.type || "chat";
+        let body = m.body || "";
+        if (msgType !== "chat" && body.startsWith("/9j/")) body = "";
+        return {
+          id: m.id._serialized || m.id.toString(),
+          sender: senderName,
+          from: senderId,
+          body,
+          timestamp: m.t ? new Date(m.t * 1000).toISOString() : null,
+          type: msgType,
+          hasMedia: m.isMedia || false,
+          isForwarded: m.isForwarded || false,
+          hasQuotedMsg: !!m.quotedMsg,
+        };
+      } catch { return null; }
+    }
+
+    function serializeMessages(models, limit = null) {
+      const selected = limit == null ? models : models.slice(-limit);
+      return selected.map(serializeMsg).filter(Boolean);
+    }
+
+    // Query local IndexedDB for messages before an anchor.
+    // Replaces the broken loadEarlierMsgs (WhatsApp Web removed
+    // waitForChatLoading from the msgs collection in April 2026).
+    // See: https://github.com/wwebjs/whatsapp-web.js/pull/201705
+    async function findMessagesBefore(anchorId, count) {
+      if (!modules.DBMessageFind || !modules.MsgKey) return [];
+
+      const anchorKey = (anchorId instanceof modules.MsgKey)
+        ? anchorId
+        : modules.MsgKey.fromString?.(anchorId._serialized || anchorId.toString?.() || anchorId);
+      if (!anchorKey) return [];
+
+      const fn = modules.DBMessageFind.msgFindByDirection
+        ? (a, n) => modules.DBMessageFind.msgFindByDirection({ anchor: a, count: n, direction: "before" })
+        : (a, n) => modules.DBMessageFind.msgFindBefore({ anchor: a, count: n });
+
+      const result = await fn(anchorKey, count);
+      const raw = Array.isArray(result) ? result : result?.messages || [];
+      if (result?.status === 404 || !raw.length) return [];
+      return toMsgModels(raw);
+    }
+
+    function dedupeAndSort(models) {
+      const seen = new Set();
+      return models
+        .filter(m => { const k = m.id?._serialized; if (!k || seen.has(k)) return false; seen.add(k); return true; })
+        .sort((a, b) => (a.t || 0) - (b.t || 0));
+    }
+
+    api.getMessages = async (chatId, count = 50) => {
       let chat = await resolveChat(chatId);
       if (!chat) throw new Error(`Chat ${chatId} not found`);
 
-      let msgStore = chat.msgs;
-      if (!msgStore) return [];
+      let models = chat.msgs?.getModelsArray ? chat.msgs.getModelsArray() : [];
 
-      let models = msgStore.getModelsArray ? msgStore.getModelsArray() : [];
-      const {
-        allowLoadEarlier = true,
-        stopAtTimestamp = null,
-      } = options || {};
-
-      // Each loadEarlierMsgs round is a real WhatsApp server request.
-      // If the first call fails (chat not fully loaded), we activate it
-      // via findOrCreateLatestChat and retry — one extra call, only once.
-      if (allowLoadEarlier && modules.ConversationMsgs?.loadEarlierMsgs) {
-        let needsActivation = false;
-        while (models.length < count) {
-          if (stopAtTimestamp && models.length > 0) {
-            const oldestTs = models[0]?.t ? new Date(models[0].t * 1000).toISOString() : null;
-            if (oldestTs && oldestTs <= stopAtTimestamp) break;
+      if (models.length < count) {
+        const anchor = models[0]?.id || chat.lastReceivedKey;
+        if (anchor) {
+          const older = await findMessagesBefore(anchor, count - models.length);
+          if (older.length) {
+            const anchorMsg = modules.Msg?.get?.(anchor._serialized || anchor);
+            models = dedupeAndSort([...older, ...(anchorMsg ? [anchorMsg] : []), ...models]);
           }
-          try {
-            const loaded = await modules.ConversationMsgs.loadEarlierMsgs(chat);
-            if (!loaded || !loaded.length) break;
-            models = msgStore.getModelsArray();
-          } catch {
-            needsActivation = true;
-            break;
-          }
-        }
-
-        if (needsActivation && modules.FindChat?.findOrCreateLatestChat && modules.WidFactory?.createWid) {
-          try {
-            const resolvedChat = await resolveChat(chatId);
-            if (resolvedChat) {
-              chat = resolvedChat;
-              msgStore = chat.msgs;
-              models = msgStore?.getModelsArray?.() || models;
-              while (models.length < count) {
-                if (stopAtTimestamp && models.length > 0) {
-                  const oldestTs = models[0]?.t ? new Date(models[0].t * 1000).toISOString() : null;
-                  if (oldestTs && oldestTs <= stopAtTimestamp) break;
-                }
-                const loaded = await modules.ConversationMsgs.loadEarlierMsgs(chat);
-                if (!loaded || !loaded.length) break;
-                models = msgStore.getModelsArray();
-              }
-            }
-          } catch {}
         }
       }
 
@@ -300,55 +316,22 @@
       let chat = await resolveChat(chatId);
       if (!chat) throw new Error(`Chat ${chatId} not found`);
 
-      let msgStore = chat.msgs;
-      if (!msgStore) return [];
+      let models = chat.msgs?.getModelsArray ? chat.msgs.getModelsArray() : [];
 
-      let models = msgStore.getModelsArray ? msgStore.getModelsArray() : [];
-      if (stopAtTimestamp && models.length > 0) {
+      const coversTarget = () => {
+        if (!stopAtTimestamp || !models.length) return false;
         const oldestTs = models[0]?.t ? new Date(models[0].t * 1000).toISOString() : null;
-        if (oldestTs && oldestTs <= stopAtTimestamp) {
-          return serializeMessages(models);
-        }
-      }
+        return oldestTs && oldestTs <= stopAtTimestamp;
+      };
 
-      if (!modules.ConversationMsgs?.loadEarlierMsgs) {
-        return serializeMessages(models);
-      }
-
-      let needsActivation = false;
-      while (true) {
-        if (stopAtTimestamp && models.length > 0) {
-          const oldestTs = models[0]?.t ? new Date(models[0].t * 1000).toISOString() : null;
-          if (oldestTs && oldestTs <= stopAtTimestamp) break;
-        }
-        try {
-          const loaded = await modules.ConversationMsgs.loadEarlierMsgs(chat);
-          if (!loaded || !loaded.length) break;
-          models = msgStore.getModelsArray();
-        } catch {
-          needsActivation = true;
-          break;
-        }
-      }
-
-      if (needsActivation && modules.FindChat?.findOrCreateLatestChat && modules.WidFactory?.createWid) {
-        try {
-          const resolvedChat = await resolveChat(chatId);
-          if (resolvedChat) {
-            chat = resolvedChat;
-            msgStore = chat.msgs;
-            models = msgStore?.getModelsArray?.() || models;
-            while (true) {
-              if (stopAtTimestamp && models.length > 0) {
-                const oldestTs = models[0]?.t ? new Date(models[0].t * 1000).toISOString() : null;
-                if (oldestTs && oldestTs <= stopAtTimestamp) break;
-              }
-              const loaded = await modules.ConversationMsgs.loadEarlierMsgs(chat);
-              if (!loaded || !loaded.length) break;
-              models = msgStore.getModelsArray();
-            }
-          }
-        } catch {}
+      let batch = 100;
+      while (!coversTarget()) {
+        const anchor = models[0]?.id || chat.lastReceivedKey;
+        if (!anchor) break;
+        const older = await findMessagesBefore(anchor, batch);
+        if (!older.length) break;
+        models = dedupeAndSort([...older, ...models]);
+        batch *= 2;
       }
 
       return serializeMessages(models);

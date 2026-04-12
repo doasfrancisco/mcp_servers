@@ -15,11 +15,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import express from "express";
 import cors from "cors";
 import { z } from "zod";
-import { ipcMain } from "electron";
+import { app, ipcMain } from "electron";
 import * as cache from "./cache.js";
+
+const ICON_B64 = readFileSync(join(app.getAppPath(), "icon_48x48.png")).toString("base64");
 
 const PORT = 39571;
 
@@ -192,6 +196,11 @@ function createServer() {
   const server = new McpServer({
     name: "whatsapp",
     version: "3.0.0",
+    icons: [{
+      src: `data:image/png;base64,${ICON_B64}`,
+      mimeType: "image/png",
+      sizes: ["48x48"],
+    }],
     instructions: `To read WhatsApp messages:
 1. Call whatsapp_list_chats (or whatsapp_list_contacts) to find the chat and grab its id.
    - whatsapp_list_chats requires at least one of: query (name/phone substring) or since (ISO timestamp).
@@ -313,6 +322,7 @@ paraphrase, abbreviate, or skip any messages. Show EVERY line.`,
     async ({ chat_id, since }) => {
       let warning = null;
       try {
+        await autoSyncContactsChats();
         const syncCutoff = since || new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
         await autoSyncMessages(chat_id, syncCutoff);
       } catch (err) {

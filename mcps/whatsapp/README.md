@@ -70,12 +70,23 @@ explicit sync step.
 - **Message refresh** (`get_messages`): reads `chat.t` from the Store (free)
   and compares against the newest cached message for that chat. If `chat.t`
   hasn't advanced, nothing is fetched. If it has, only messages newer than
-  the cached baseline are pulled. The only branch that triggers real
-  WhatsApp server requests is a cold chat (no message cache yet), where
-  `ConversationMsgs.loadEarlierMsgs` is looped to pull back-history — capped
-  at ~5000 messages per call.
+  the cached baseline are pulled via `WAWebDBMessageFindLocal.msgFindBefore`
+  (local IndexedDB reads, no server calls). Batch size grows exponentially
+  (100 → 200 → 400...) until the cached baseline is reached.
+
+### WhatsApp Web API change (April 2026)
+
+WhatsApp Web removed `waitForChatLoading` from the chat message collection
+in early April 2026, breaking `ConversationMsgs.loadEarlierMsgs` for all
+consumers ([wwebjs/whatsapp-web.js#201706](https://github.com/wwebjs/whatsapp-web.js/issues/201706)).
+
+This project now uses `WAWebDBMessageFindLocal.msgFindBefore` to read
+messages from the local IndexedDB instead. This covers all messages
+WhatsApp Web has previously downloaded. For very old messages never loaded
+in the current session, history is limited to what's in the local DB.
 
 ## Inspiration
 
 - [forgexfoundation/whatsapp-desktop-client](https://github.com/forgexfoundation/whatsapp-desktop-client) — Electron shell structure (window state, single-instance lock, protocol handler).
 - [pedroslopez/whatsapp-web.js](https://github.com/pedroslopez/whatsapp-web.js) — Reference for WhatsApp Web webpack module names and Store API patterns. This project does not use whatsapp-web.js as a dependency.
+- [wwebjs/whatsapp-web.js#201705](https://github.com/wwebjs/whatsapp-web.js/pull/201705) — `msgFindBefore` fix for the `loadEarlierMsgs` breakage.
