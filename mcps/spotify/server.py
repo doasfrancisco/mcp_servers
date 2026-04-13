@@ -112,7 +112,7 @@ def spotify_search(
         query: Search query (e.g. "Bohemian Rhapsody", "artist:Queen").
         type: Comma-separated types to search: track, artist, album, playlist. Default "track".
     """
-    results = _get_sp().search(q=query, limit=50, type=type)
+    results = _get_sp().search(q=query, limit=10, type=type)
     out = {}
     for key in results:
         items = results[key]["items"]
