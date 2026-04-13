@@ -133,16 +133,105 @@ Config file location:
 - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 - **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 
-## Connecting to Claude Code
+## Credentials
 
-Claude Code supports HTTP MCP servers directly:
+Store secrets in the repo root `.env` (already gitignored). Servers load them with `python-dotenv` and pass explicitly via `os.getenv()`:
 
-```bash
-claude mcp add -s user my-server -- uv run --directory /path/to/mcps/my-server fastmcp run server.py
+```python
+import os
+from dotenv import load_dotenv
+from pathlib import Path
+
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
+
+# Always pass credentials explicitly — don't rely on libraries reading env vars implicitly
+client = SomeAPI(
+    api_key=os.getenv("MY_API_KEY"),
+    secret=os.getenv("MY_API_SECRET"),
+)
 ```
 
-Or for HTTP servers:
+## Project layout
+
+Prefer `pyproject.toml` over `requirements.txt` when using `uv`:
+
+```toml
+[project]
+name = "my-mcp-server"
+version = "1.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp==3.0.2",
+    "python-dotenv>=1.0",
+    "my-api-library>=1.0",
+]
+```
+
+## Code patterns
+
+### Separate client from server
+
+Keep API logic in a dedicated client module:
+
+```
+mcps/my-server/
+    server.py          # FastMCP tools — thin wrappers
+    my_client.py       # API client — auth, token caching, raw calls
+```
+
+### Logging
+
+```python
+from logging.handlers import RotatingFileHandler
+
+_log_dir = Path(__file__).parent / "logs"
+_log_dir.mkdir(exist_ok=True)
+logging.basicConfig(
+    level=logging.WARNING,
+    handlers=[RotatingFileHandler(_log_dir / "server.log", maxBytes=5_000_000, backupCount=1)],
+)
+```
+
+### FastMCP instructions
+
+Guide AI behavior with the `instructions` parameter:
+
+```python
+mcp = FastMCP(
+    "MyServer",
+    instructions="""When the user asks to..., always do X first.
+Before executing any write operation, tell the user and STOP.""",
+)
+```
+
+### Token caching
+
+For OAuth-based APIs, cache tokens alongside the server code so users don't re-auth every restart:
+
+```python
+cache_path = Path(__file__).parent / ".my_token_cache"
+```
+
+## Testing
+
+Create a simple test script first to validate API access before building the full server.
+
+## Connecting to Claude Code
+
+Always register with **user scope** (`-s user`) so the server is available in every project. Use `uv run` + `fastmcp run` as the command:
 
 ```bash
-claude mcp add --transport http my-server http://localhost:PORT/mcp
+claude mcp add -s user <name> -- uv run --directory /path/to/mcps/my-server fastmcp run server.py
+```
+
+Pick a **generic name** that matches what the user would naturally say. For example, register a Spotify server as `music` so "play a song" triggers the right tools:
+
+```bash
+claude mcp add -s user music -- uv run --directory /path/to/mcps/spotify fastmcp run server.py
+```
+
+For HTTP servers:
+
+```bash
+claude mcp add -s user --transport http <name> http://localhost:PORT/mcp
 ```

@@ -5,8 +5,12 @@
 
 # OAuth tokens (contains secrets)
 .tokens.json
+.cache
 mcps/gmail/credentials/*.json
 mcps/gmail/accounts.json
+
+# Spotify
+mcps/spotify/.spotify_token_cache
 
 # Drive MCP
 mcps/drive/credentials/*.json
