@@ -235,3 +235,25 @@ For HTTP servers:
 ```bash
 claude mcp add -s user --transport http <name> http://localhost:PORT/mcp
 ```
+
+## Connecting to Droid
+
+For Droid, register local stdio MCP servers with `droid mcp add` and pass the full launch command as a quoted string:
+
+```bash
+droid mcp add <name> "uv run --directory /path/to/mcps/my-server fastmcp run server.py"
+```
+
+Pick a **generic name** that matches what the user would naturally say. For example, register a Spotify server as `music` so "play a song" triggers the right tools:
+
+```bash
+droid mcp add music "uv run --directory /path/to/mcps/spotify fastmcp run server.py"
+```
+
+For HTTP servers:
+
+```bash
+droid mcp add <name> http://localhost:PORT/mcp --type http
+```
+
+Droid stores user-level MCP registrations in `~/.factory/mcp.json` (Windows: `%USERPROFILE%\.factory\mcp.json`).

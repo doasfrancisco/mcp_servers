@@ -66,6 +66,38 @@ def _format_track(track: dict) -> dict:
     }
 
 
+def _current_playback_summary(sp) -> dict | None:
+    """Return a compact snapshot of current playback state."""
+    playback = sp.current_playback()
+    if not playback:
+        return None
+
+    item = playback.get("item")
+    return {
+        "is_playing": playback.get("is_playing"),
+        "shuffle_state": playback.get("shuffle_state"),
+        "repeat_state": playback.get("repeat_state"),
+        "device": (playback.get("device") or {}).get("name"),
+        "track": _format_track(item) if item else None,
+    }
+
+
+def _context_summary(sp, context_uri: str) -> dict:
+    """Return metadata for the playback context when available."""
+    summary = {"uri": context_uri}
+    if context_uri.startswith("spotify:playlist:"):
+        playlist = sp.playlist(context_uri, fields="name,uri,id")
+        summary.update({
+            "type": "playlist",
+            "id": playlist.get("id"),
+            "name": playlist.get("name"),
+            "uri": playlist.get("uri", context_uri),
+        })
+    else:
+        summary["type"] = "context"
+    return summary
+
+
 # ── Search ────────────────────────────────────────────────────────────
 
 
@@ -191,14 +223,24 @@ def spotify_play(
         offset = _random.randint(0, max(total - 1, 0))
         track = sp.current_user_saved_tracks(limit=1, offset=offset)["items"][0]["track"]
         sp.start_playback(device_id=device_id, uris=[track["uri"]])
-        return _json({"status": "playing", "track": _format_track(track)})
+        return _json(
+            {
+                "status": "playing",
+                "track": _format_track(track),
+                "playback": _current_playback_summary(sp),
+            }
+        )
     if uri:
         sp.start_playback(device_id=device_id, uris=[uri])
     elif context_uri:
+        sp.shuffle(True, device_id=device_id)
         sp.start_playback(device_id=device_id, context_uri=context_uri)
     else:
         sp.start_playback(device_id=device_id)
-    return _json({"status": "playing"})
+    response = {"status": "playing", "playback": _current_playback_summary(sp)}
+    if context_uri:
+        response["source_context"] = _context_summary(sp, context_uri)
+    return _json(response)
 
 
 @mcp.tool()

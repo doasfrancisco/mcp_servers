@@ -1,10 +1,10 @@
 # Skills
 
-How to build and deploy Claude Code skills in this repo.
+How to build and deploy Claude Code and Droid skills in this repo.
 
 ## What is a skill?
 
-A skill is a folder with a `SKILL.md` file that teaches Claude Code how to do something specific. When the user types `/skill-name`, Claude reads the SKILL.md and follows its instructions.
+A skill is a folder with a `SKILL.md` file that teaches Claude Code or Droid how to do something specific. When the user types `/skill-name`, the agent reads the SKILL.md and follows its instructions.
 
 ## Structure
 
@@ -38,9 +38,9 @@ description: One-line description of what it does and when to use it.
 ---
 ```
 
-The `description` field is what Claude uses to decide whether to trigger the skill. Be specific about trigger phrases (e.g., "Use when the user says 'push', 'ship it', or invokes /my-skill").
+The `description` field is what the agent uses to decide whether to trigger the skill. Be specific about trigger phrases (e.g., "Use when the user says 'push', 'ship it', or invokes /my-skill").
 
-**Body** — the actual instructions Claude follows. Write it like you're briefing a colleague:
+**Body** — the actual instructions the agent follows. Write it like you're briefing a colleague:
 
 - Tell Claude exactly what commands to run
 - Specify the order of operations
@@ -63,24 +63,28 @@ For credits, source links, or context that isn't part of the skill instructions.
 
 ## Deploying
 
-Skills are developed here in `skills/` and deployed to `~/.claude/skills/` using `deploy.py`.
+Skills are developed here in `skills/` and deployed with `deploy_skills.py`.
+The deploy script installs them to both:
+
+- `~/.claude/skills/`
+- `~/.factory/skills/`
 
 ```bash
 # Deploy one or more skills
-python deploy.py --add my-skill
-python deploy.py --add my-skill another-skill
+python deploy_skills.py --add my-skill
+python deploy_skills.py --add my-skill another-skill
 
 # Deploy all skills
-python deploy.py --all
+python deploy_skills.py --all
 
 # Check what changed without deploying
-python deploy.py --diff my-skill
+python deploy_skills.py --diff my-skill
 
 # List available skills and their install status
-python deploy.py --list
+python deploy_skills.py --list
 ```
 
-After deploying, the skill is immediately available as `/my-skill` in any Claude Code session.
+After deploying, the skill is immediately available as `/my-skill` in Claude Code and Droid sessions.
 
 ## Tips
 
