@@ -1,9 +1,9 @@
 ---
-name: nia-fix
-description: Query documentation sites via nia-docs when you need to look up docs for a library, cloud provider, or framework. Use proactively when the user says "ask nia", "check the docs", "look it up", or invokes /nia-fix.
+name: vendor-skills-gap-fix
+description: Query documentation sites via nia-docs when you need to look up docs for a library, cloud provider, or framework. Use proactively when the user says "ask nia", "check the docs", "look it up", or invokes /vendor-skills-gap-fix.
 ---
 
-# nia-fix
+# vendor-skills-gap-fix
 
 Use `npx nia-docs` to browse any documentation site as a virtual filesystem. You can `ls`, `grep`, `cat`, and pipe — standard bash.
 
