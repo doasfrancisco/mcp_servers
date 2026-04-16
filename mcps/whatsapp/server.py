@@ -1,10 +1,11 @@
 import json
 import logging
-import shutil
+import os
 from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from urllib.parse import urlparse, unquote
+
+import httpx
 
 _log_dir = Path(__file__).parent / "logs"
 _log_dir.mkdir(exist_ok=True)
@@ -15,6 +16,7 @@ logging.basicConfig(
 )
 
 from fastmcp import FastMCP
+from fastmcp.utilities.types import File
 from beeper_client import build_client
 
 mcp = FastMCP(
@@ -28,7 +30,10 @@ To read WhatsApp messages:
 
 CRITICAL — whatsapp_get_messages returns pre-formatted conversation output.
 You MUST paste the ENTIRE text content into your response as a verbatim code block.
-Do NOT summarize, paraphrase, abbreviate, or skip any messages. Show EVERY line.""",
+Do NOT summarize, paraphrase, abbreviate, or skip any messages. Show EVERY line.
+
+When whatsapp_download_files returns file content, save each file to ~/Downloads
+with its original filename (the token name, e.g. "hash.jpg").""",
 )
 
 _client = None
@@ -302,63 +307,51 @@ def whatsapp_tag_contacts(entries: list[dict]) -> str:
     return "\n".join(lines)
 
 
-_DOWNLOADS_DIR = Path.home() / "Downloads"
-
-def _unique_dest(dest: Path) -> Path:
-    if not dest.exists():
-        return dest
-    stem, suffix, i = dest.stem, dest.suffix, 1
-    while True:
-        candidate = dest.with_name(f"{stem} ({i}){suffix}")
-        if not candidate.exists():
-            return candidate
-        i += 1
+_BEEPER_BASE = os.getenv("BEEPER_BASE_URL", "http://localhost:23373")
+_BEEPER_TOKEN = os.getenv("BEEPER_ACCESS_TOKEN", "")
 
 
 @mcp.tool()
-def whatsapp_download_files(tokens: list[str]) -> str:
+def whatsapp_download_files(tokens: list[str]) -> list:
     """Download attachments shown as [token] in whatsapp_get_messages output.
 
-      • tokens — list of hash tokens (or full mxc:// urls) from get_messages
+      • tokens — list of hash tokens (e.g. "hash.jpg") from get_messages
 
-    Each file is saved to the user's Downloads folder. The tool resolves tokens by
-    prepending the Beeper media prefix (mxc://local.beeper.com/<your-username>_),
-    calls assets.download to get a local path, then copies it to Downloads with
-    its original filename.
+    Streams file bytes from Beeper's serve endpoint and returns them directly
+    to the client. No files are saved on the server.
     """
-    client = _get_client()
     prefix = _get_media_prefix()
-    _DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    lines = []
+    results = []
 
     for t in tokens:
         if not t:
-            lines.append("ERROR: empty token")
+            results.append("ERROR: empty token")
             continue
 
-        is_raw_url = t.startswith(("mxc://", "localmxc://", "file://"))
+        is_raw_url = t.startswith(("mxc://", "localmxc://"))
         if is_raw_url:
-            hash_part, ext, url = t, "", t
+            mxc_url = t
+            name = t.split("/")[-1]
         else:
-            stem = Path(t)
-            hash_part, ext = stem.stem, stem.suffix
-            url = f"{prefix}{hash_part}"
+            p = Path(t)
+            hash_part, ext = p.stem, p.suffix
+            mxc_url = f"{prefix}{hash_part}"
+            name = t
 
         try:
-            resp = client.assets.download(url=url)
-            if resp.error:
-                lines.append(f"ERROR ({t}): {resp.error}")
-                continue
-
-            src_path = Path(unquote(urlparse(resp.src_url).path.lstrip("/")))
-            name = f"{hash_part}{ext}" if hash_part and not is_raw_url else src_path.name
-            dest = _unique_dest(_DOWNLOADS_DIR / name)
-            shutil.copy2(src_path, dest)
-            lines.append(str(dest))
+            resp = httpx.get(
+                f"{_BEEPER_BASE}/v1/assets/serve",
+                params={"url": mxc_url},
+                headers={"Authorization": f"Bearer {_BEEPER_TOKEN}", "Accept": "*/*"},
+                timeout=60,
+            )
+            resp.raise_for_status()
+            fmt = Path(name).suffix.lstrip(".") or "bin"
+            results.append(File(data=resp.content, format=fmt, name=name))
         except Exception as e:
-            lines.append(f"ERROR ({t}): {type(e).__name__}: {str(e)[:120]}")
+            results.append(f"ERROR ({t}): {type(e).__name__}: {str(e)[:120]}")
 
-    return "\n".join(lines)
+    return results
 
 
 if __name__ == "__main__":

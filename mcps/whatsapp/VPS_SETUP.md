@@ -64,7 +64,18 @@ curl http://localhost:23373/v1/info
 
 Close Beeper (Ctrl+C) and close RDP. You won't need RDP again.
 
-## Step 4: Clone the repo and configure
+## Step 4: Set timezone
+
+By default most VPS instances use UTC. The MCP server uses the host's local timezone for message timestamps, so set it before running anything:
+
+```bash
+sudo timedatectl set-timezone America/Lima
+timedatectl   # Should show "Time zone: America/Lima (PET, -0500)"
+```
+
+Find your timezone with `timedatectl list-timezones | grep <City>`.
+
+## Step 5: Clone the repo and configure
 
 ```bash
 cd ~
@@ -88,7 +99,7 @@ uv sync
 
 Copy `tags.json` from your local machine if you have existing tags (optional).
 
-## Step 5: Test manually before creating services
+## Step 6: Test manually before creating services
 
 ```bash
 # Start Xvfb
@@ -118,7 +129,7 @@ curl http://<your-vps-ip>:23380/mcp
 
 Kill everything before proceeding (`pkill -f Xvfb && pkill -f beepertexts && pkill -f fastmcp`).
 
-## Step 6: Create systemd services
+## Step 7: Create systemd services
 
 ### Xvfb service
 
@@ -214,7 +225,7 @@ curl http://localhost:23373/v1/info    # Beeper API
 curl http://localhost:23380/mcp        # MCP server
 ```
 
-## Step 7: Open ports
+## Step 8: Open ports
 
 The MCP server binds to `0.0.0.0:23380` and x11vnc to `0.0.0.0:5900`, but cloud providers block inbound traffic by default. You need to open both ports.
 
@@ -245,7 +256,7 @@ sudo ufw allow 23380/tcp
 sudo ufw allow 5900/tcp
 ```
 
-## Step 8: Register in Claude Code
+## Step 10: Register in Claude Code
 
 ```bash
 claude mcp remove whatsapp
