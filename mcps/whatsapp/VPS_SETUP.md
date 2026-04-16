@@ -195,11 +195,30 @@ curl http://localhost:23380/mcp        # MCP server
 
 ## Step 7: Open the port
 
-Open port 23380 in your cloud provider's firewall:
+The MCP server binds to `0.0.0.0:23380` but cloud providers block inbound traffic by default. You need to open the port in both the cloud firewall and (optionally) the OS firewall.
 
-- **Azure**: Networking → Inbound port rules → Add → Port 23380, TCP, Allow
-- **AWS**: Security Group → Edit inbound rules → Custom TCP 23380
-- **Ubuntu firewall** (if enabled): `sudo ufw allow 23380/tcp`
+### Azure
+
+1. Go to your VM in the Azure Portal
+2. **Networking → Network settings**
+3. Click **Add inbound port rule** (or find the existing NSG rules)
+4. Fill in:
+   - **Destination port ranges**: `23380`
+   - **Protocol**: TCP
+   - **Action**: Allow
+   - **Priority**: `1010` (any unused number)
+   - **Name**: `AllowMCP`
+5. Click **Add**. Takes ~30 seconds to propagate.
+
+### AWS
+
+Security Group → Edit inbound rules → Add rule → Custom TCP, port 23380, source 0.0.0.0/0.
+
+### Ubuntu firewall (if enabled)
+
+```bash
+sudo ufw allow 23380/tcp
+```
 
 ## Step 8: Register in Claude Code
 
