@@ -78,8 +78,7 @@ Rules for the Link column:
 
 - **Repositories** → `https://github.com/<identifier>` (the identifier is already `owner/repo`).
 - **Documentation** → use the `identifier` verbatim (it's already the docs URL).
-- **Research papers** → use the arXiv URL from the resolve result.
-- **Not indexed** → leave as `—`.
+- **Not indexed** → **do not guess** the URL. Make **a single `WebSearch` call that covers every unindexed dep at once, for both repo and docs** — concatenate all unindexed package names into one query. Example: if `react`, `boto3`, and `PyMuPDF` are unindexed, call `WebSearch("react boto3 PyMuPDF github repository official documentation")`. One search returns the canonical GitHub URL AND the canonical docs URL for each package in the top results. From the results, extract per-dep: (a) the real `owner/repo` for the `nia repos index` suggestion, (b) the GitHub URL for the repo-row Link, (c) the docs URL for a second "docs" row (so the user can also `nia sources index <docs-url>` if they want). Do NOT make one search per dep — Google handles the concatenated query fine and a single call is strictly faster.
 
 Also show the **skip list** below the table for transparency (e.g. `Skipped: <dep-a>, <dep-b> (reason)`).
 
