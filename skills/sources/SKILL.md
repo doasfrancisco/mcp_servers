@@ -37,21 +37,55 @@ Not every dep deserves a Nia source. The goal is a short list of libraries that 
 
 **Keep** frameworks, SDKs, platform libraries, and anything domain-specific. Example from this repo: keep `fastmcp`, `google-api-python-client`, `spotipy`, `beeper-desktop-api`, `@modelcontextprotocol/sdk`, `whatsapp-web.js`, `electron`, `express`, `glpi`. Skip `python-dotenv`, `httpx`, `pillow`, `pystray`, `cors`, `zod`, `urllib3`.
 
-When in doubt, **keep** it — the user can drop rows before the file is written.
+When in doubt, **keep** it — the annotated resolution results in step 4 will tell you which keeps are actually indexed, and the user can drop rows before the file is written.
 
-Show the user the proposed keep list and the skip list, and wait for them to approve or edit before continuing.
+**Do NOT show the keep list and ask for approval yet.** Go straight to step 4 and resolve the whole keep list against Nia first — the user needs to see which are indexed before they can decide what to drop.
 
-## 4. Resolve each dep against Nia
-
-For every kept dep, run:
+## 4. Resolve the keep list against Nia, then present an annotated table
 
 ```bash
-nia sources resolve "<name>"
+# One-time dump — cache the full indexed-sources catalog
+nia sources list --all > /tmp/nia_sources.txt
 ```
 
-The resolver accepts package names, URLs, or `owner/repo` identifiers. From each result capture the canonical `identifier`. **Strip any branch suffix** (`:main`, `:master`, `:trunk`) — use the bare `owner/repo` form.
+Then do **a single grep for all deps at once** using a regex alternation. Build the pattern by joining every dep with `|`:
 
-If a dep returns `Source resource not found`, skip it and remember the name. You'll list unresolved deps at the end so the user can decide whether to `nia repos index <owner/repo>`.
+```bash
+# Replace <dep1>|<dep2>|... with your actual keep list
+DEPS="convex|next|fastmcp|express|electron|spotipy|boto3|PyMuPDF|pyproj"
+grep -iE -B 3 -A 1 "^  (identifier|display_name): .*(${DEPS})" /tmp/nia_sources.txt
+```
+
+One invocation returns every hit across the full keep list — no per-dep loop, no parallel calls, no cancellations.
+
+Rules for interpreting matches:
+
+- **Multiple hits for one dep is common and expected** — e.g. `convex` has both `https://docs.convex.dev/` (documentation) and `get-convex/convex-backend` (repository). Show the user all hits per dep and let them pick the right one (or keep both, with different `Type`).
+- **Pick `status: indexed` or `ready` over `status: processing`** — processing sources aren't searchable yet.
+- **Strip any branch suffix** from the `identifier` before writing (`:main`, `:master`, `:trunk` — these only appear in `display_name`, but double-check).
+- **No hits** for a dep → classify as **not indexed**. Suggest `nia repos index <guess-owner/repo>` with the best-guess owner/repo (standard pattern: `<org>/<pkgname>` for JS, `<owner>/<pkgname>` for Python on PyPI).
+
+Then present **one annotated table** to the user using this exact shape — one row per dep, with the Link column so they can click through and confirm the resolution is correct:
+
+```
+| Dep | Status | Nia identifier | Link |
+|---|---|---|---|
+| <dep-name> | ✓ indexed | <owner/repo> | https://github.com/<owner/repo> |
+| <dep-name> | ✗ not indexed | — (run `nia repos index <guess-owner/repo>`) | — |
+```
+
+Rules for the Link column:
+
+- **Repositories** → `https://github.com/<identifier>` (the identifier is already `owner/repo`).
+- **Documentation** → use the `identifier` verbatim (it's already the docs URL).
+- **Research papers** → use the arXiv URL from the resolve result.
+- **Not indexed** → leave as `—`.
+
+Also show the **skip list** below the table for transparency (e.g. `Skipped: <dep-a>, <dep-b> (reason)`).
+
+Now ask the user: "Keep all indexed rows? Drop any? Index the missing ones before writing, or skip them?"
+
+Wait for their answer before writing nia.md.
 
 ## 5. Write nia.md
 
@@ -113,16 +147,26 @@ Append each resolved extra to the Sources table with its correct `Type`.
 
 ## Commands to list and filter Nia sources
 
-Use these verbatim — never pipe through `head` or `tail`. Read the whole output.
+**Preferred pattern — dump once, grep many.** One 4s network call, then unlimited local lookups.
 
 ```bash
-# Full list — use --all to paginate through every source
-nia sources list --all
-nia repos list --all
-nia sources list --type repository --all
-nia sources list --type documentation --all
+# Dump the full indexed catalog to a local file
+nia sources list --all > /tmp/nia_sources.txt
 
-# Resolve a name / URL / owner-repo to a Nia source (returns id, type, identifier)
+# Grep for any dep — matches identifier OR display_name, with 3 lines of leading context
+grep -iE -B 3 -A 1 "^  identifier: .*<dep>|^  display_name: .*<dep>" /tmp/nia_sources.txt
+
+# Restrict to a single type
+nia sources list --type repository --all > /tmp/nia_repos.txt
+nia sources list --type documentation --all > /tmp/nia_docs.txt
+```
+
+Never pipe these through `head` / `tail` — at 1000+ sources, pagination misses are the #1 cause of wrong source picks. Redirect to a file and grep it instead.
+
+Fallback commands (only when the grep-the-dump flow above isn't available):
+
+```bash
+# Resolve a single known identifier to its Nia id (slow; one round-trip per call)
 nia sources resolve "<name>"
 nia sources resolve "<owner/repo>"
 nia sources resolve "<url>" --type documentation
@@ -135,7 +179,9 @@ nia sources index <root-doc-url>
 ## Rules
 
 - NEVER include `devDependencies` — runtime deps only.
-- NEVER include every dep — filter with step 3 first, then confirm with the user before resolving.
+- NEVER include every dep — filter with step 3 first.
+- NEVER pause for approval between steps 3 and 4. Filter, then resolve the whole keep list up front, THEN present an annotated table so the user can make an informed keep/drop call with indexing status visible.
+- NEVER call `nia sources resolve` once per dep in a loop. Always dump `nia sources list --all` to a file first, then grep locally. The per-dep resolver is slow and frequently cancels sibling parallel calls.
 - NEVER modify the Rules section of nia.md or the example lines.
 - NEVER pipe `nia sources list` / `nia repos list` through `head` or `tail`. Read the whole output.
 - NEVER commit nia.md without showing the user the final contents.
