@@ -1,8 +1,10 @@
 """GLPI MCP Server — IT service management via GLPI REST API."""
 
 import json
+import os
 
 from fastmcp import FastMCP
+from fastmcp.utilities.types import File
 
 from glpi_client import GLPIClient
 
@@ -221,7 +223,152 @@ def glpi_search(
     ))
 
 
+# --- Tier 1: Ticket composition tools ---
+
+
 @mcp.tool()
-def glpi_tickets_today() -> str:
-    """Get all tickets created today. Returns id, name, category, status, and creation date."""
-    return _json(_get_client().search_tickets_today())
+def glpi_search_tickets(
+    status: str | None = None,
+    category: str | None = None,
+    assignee: str | None = None,
+    requester: str | None = None,
+    group: str | None = None,
+    priority: str | None = None,
+    ticket_type: str | None = None,
+    entity: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    text: str | None = None,
+    due_within_hours: int | None = None,
+    range: str = "0-49",
+    order: str = "DESC",
+) -> str:
+    """Search tickets with name-based filters. Resolves names to IDs internally.
+
+    For "tickets opened today": pass date_from="YYYY-MM-DD 00:00:00".
+    For "tickets at risk of breaching SLA": combine due_within_hours=24 with status="open".
+
+    Args:
+        status: "new", "assigned", "planned", "waiting", "solved", "closed", or "open" (= not solved/closed).
+        category: ITIL category name or "Parent > Child" path.
+        assignee: User login, realname, firstname, email, or numeric ID — of the technician assigned.
+        requester: User login/name of the person who opened the ticket.
+        group: Assignee group name.
+        priority: "very low", "low", "medium", "high", "very high", "major".
+        ticket_type: "incident" or "request".
+        entity: Entity name.
+        date_from: ISO datetime "YYYY-MM-DD HH:MM:SS" — tickets created after.
+        date_to: ISO datetime — tickets created before.
+        text: Substring to match in ticket name/title.
+        due_within_hours: Include only tickets with a due_date within N hours from now
+            (captures already-breached + about-to-breach). Combine with status='open' for SLA-risk queries.
+        range: Pagination (default "0-49"). Sorted by creation date DESC by default.
+        order: "ASC" or "DESC".
+    """
+    return _json(_get_client().search_tickets(
+        status=status, category=category, assignee=assignee, requester=requester,
+        group=group, priority=priority, ticket_type=ticket_type, entity=entity,
+        date_from=date_from, date_to=date_to, text=text,
+        due_within_hours=due_within_hours,
+        range_str=range, order=order,
+    ))
+
+
+@mcp.tool()
+def glpi_get_itil_timeline(itemtype: str, item_id: int) -> str:
+    """Chronological feed for a Ticket/Problem/Change: merges followups + tasks + solutions + validations + logs, sorted by date.
+
+    Each entry is annotated with `_kind` (followup/task/solution/validation/log) and `_sub_type` (the source endpoint).
+
+    Args:
+        itemtype: "Ticket", "Problem", or "Change".
+        item_id: The ID of the item.
+    """
+    return _json(_get_client().get_itil_timeline(itemtype, item_id))
+
+
+@mcp.tool()
+def glpi_get_ticket_full(ticket_id: int) -> str:
+    """Fetch a ticket with every useful relation in one call: expanded fields, documents, logs, notes, linked problems/changes/contracts, plus followups, tasks, solutions, validations, linked users/groups/assets, AND a sorted chronological `timeline` combining followups + tasks + solutions + validations + logs.
+
+    Use this instead of making 6+ separate calls to understand a ticket end-to-end. The timeline field replaces the need to also call glpi_get_itil_timeline for tickets.
+    """
+    return _json(_get_client().get_ticket_full(ticket_id))
+
+
+@mcp.tool()
+def glpi_get_ticket_stats(
+    group_by: str = "status",
+    date_from: str | None = None,
+    date_to: str | None = None,
+    status: str | None = None,
+    category: str | None = None,
+    assignee: str | None = None,
+    entity: str | None = None,
+) -> str:
+    """Aggregate tickets by status/category/priority/assignee/type. Returns label-to-count map plus _total.
+
+    Args:
+        group_by: Field to group by — one of: "status", "category", "priority", "assignee", "type",
+            "requester", "entity", "assignee_group".
+        date_from: Optional ISO datetime lower bound on creation date.
+        date_to: Optional ISO datetime upper bound on creation date.
+        status/category/assignee/entity: Optional filters (same semantics as glpi_search_tickets).
+    """
+    return _json(_get_client().get_ticket_stats(
+        group_by=group_by, date_from=date_from, date_to=date_to,
+        status=status, category=category, assignee=assignee, entity=entity,
+    ))
+
+
+# --- Tier 2: Enrichment tools ---
+
+
+@mcp.tool()
+def glpi_list_categories(with_counts: bool = False) -> str:
+    """ITIL category tree with completename (full "Parent > Child" path). Optionally include ticket counts.
+
+    Args:
+        with_counts: If true, include per-category ticket count (one extra search per category — slower).
+    """
+    return _json(_get_client().list_categories(with_counts=with_counts))
+
+
+@mcp.tool()
+def glpi_list_sla_ola() -> str:
+    """List SLA (customer-facing) and OLA (internal) definitions with target times and attached categories."""
+    return _json(_get_client().list_sla_ola())
+
+
+@mcp.tool()
+def glpi_search_knowbase(query: str, range: str = "0-20") -> str:
+    """Search GLPI's knowledge base (FAQ) by title and content. Use before triaging a ticket to find prior solutions.
+
+    Args:
+        query: Search text.
+        range: Pagination (default "0-20").
+    """
+    return _json(_get_client().search_knowbase(query, range_str=range))
+
+
+@mcp.tool()
+def glpi_download_document(document_id: int) -> File:
+    """Download a document's bytes. Returns a File suitable for inline inspection.
+
+    Raises if GLPI's underlying file is missing on disk (common on legacy servers).
+    """
+    data, filename, mime = _get_client().download_document(document_id)
+    ext = os.path.splitext(filename)[1].lstrip(".").lower() or "bin"
+    return File(data=data, format=ext, name=filename)
+
+
+@mcp.tool()
+def glpi_get_user_context(identifier: str) -> str:
+    """Resolve a user (by login, realname, firstname, email, or numeric ID) and return their profile, group memberships, tickets they opened, and tickets assigned to them.
+
+    Use when you need to understand "who is X and what's on their plate."
+
+    Args:
+        identifier: Login name, realname, firstname, email, or numeric user ID.
+    """
+    return _json(_get_client().get_user_context(identifier))
