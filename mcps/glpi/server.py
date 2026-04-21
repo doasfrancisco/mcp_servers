@@ -14,12 +14,22 @@ mcp = FastMCP(
 
 This server connects to a GLPI instance (IT service management) at ti.pulsosalud.com.
 
-Ticket status codes: 1=New, 2=Assigned, 3=Planned, 4=Waiting, 5=Solved, 6=Closed.
+Ticket status codes and emojis (use the emoji when presenting status to the user):
+  1=New       🆕
+  2=Assigned  👤
+  3=Planned   📅
+  4=Waiting   ⏸️
+  5=Solved    ✅
+  6=Closed    🔒
 
-When presenting results:
-- Format ticket lists as numbered items with status, title, and date
+When presenting ticket lists:
+- Start each row with the time (HH:MM), then "[<emoji>] — <Status>", then " — ", then #id, title, category
+- No numbered list; one ticket per line, in the order returned by the tool (tools default to chronological ascending — oldest first)
 - Use expand_dropdowns=true when showing data to users (names instead of IDs)
 - For search results, field IDs map to: 1=name, 2=id, 7=category, 12=status, 15=date_creation
+
+Example row:
+  06:56 [🆕] — Status — #32654 ELIMINAR ATENCION · ANA Prevention
 """,
 )
 
@@ -37,16 +47,7 @@ def _json(data) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False)
 
 
-# --- Session & config ---
-
-
-@mcp.tool()
-def glpi_get_session() -> str:
-    """Get full session data: active profile and permissions, all profiles, entities, user info, and UI preferences.
-
-    Encompasses getMyProfiles, getActiveProfile, getMyEntities, and getActiveEntities in a single call.
-    """
-    return _json(_get_client().get_full_session())
+# --- Server info ---
 
 
 _CONFIG_KEYS = [
@@ -60,123 +61,27 @@ _CONFIG_KEYS = [
 
 
 @mcp.tool()
-def glpi_config(full: bool = False) -> str:
-    """Get global GLPI configuration ($CFG_GLPI).
+def glpi_server_info(include_config: bool = True) -> str:
+    """Get the server's identity in one call.
 
-    By default returns only the important keys (version, emails, timezone, limits, etc.).
+    - session: active profile and permissions, all profiles, entities, user info, UI preferences.
+      (Encompasses getMyProfiles, getActiveProfile, getMyEntities, getActiveEntities.)
+    - config (when include_config=True): curated $CFG_GLPI subset — version, URL, emails, timezone,
+      list limits, API/maintenance flags, password policy, ticket/asset type lists.
 
     Args:
-        full: Return the entire $CFG_GLPI dump instead of the curated subset.
+        include_config: Include the curated GLPI config subset (default: True).
     """
-    data = _get_client().get_glpi_config()
-    if full:
-        return _json(data)
-    cfg = data.get("cfg_glpi", data)
-    return _json({k: cfg[k] for k in _CONFIG_KEYS if k in cfg})
+    client = _get_client()
+    result: dict = {"session": client.get_full_session()}
+    if include_config:
+        raw = client.get_glpi_config()
+        cfg = raw.get("cfg_glpi", raw)
+        result["config"] = {k: cfg[k] for k in _CONFIG_KEYS if k in cfg}
+    return _json(result)
 
 
 # --- CRUD read ---
-
-
-@mcp.tool()
-def glpi_get_item(
-    itemtype: str,
-    item_id: int,
-    expand_dropdowns: bool = False,
-    with_tickets: bool = False,
-    with_documents: bool = False,
-    with_logs: bool = False,
-    with_notes: bool = False,
-    with_networkports: bool = False,
-    with_contracts: bool = False,
-    with_problems: bool = False,
-    with_changes: bool = False,
-    with_infocoms: bool = False,
-    with_devices: bool = False,
-    with_softwares: bool = False,
-    with_connections: bool = False,
-    with_disks: bool = False,
-) -> str:
-    """Get a single item by ID. Works with any itemtype (Ticket, Computer, User, etc.).
-
-    Args:
-        itemtype: GLPI class name (e.g. "Ticket", "Computer", "User", "Software").
-        item_id: Unique ID of the item.
-        expand_dropdowns: Show names instead of IDs for dropdown fields.
-        with_tickets: Include associated ITIL tickets.
-        with_documents: Include attached documents.
-        with_logs: Include change history.
-        with_notes: Include notes.
-        with_networkports: Include network connections.
-        with_contracts: Include associated contracts.
-        with_problems: Include associated ITIL problems.
-        with_changes: Include associated ITIL changes.
-        with_infocoms: Include financial/administrative info.
-        with_devices: Include hardware components (Computer, NetworkEquipment, Peripheral, Phone, Printer).
-        with_softwares: Include installed software (Computer only).
-        with_connections: Include direct connections (Computer only).
-        with_disks: Include file systems (Computer only).
-    """
-    return _json(_get_client().get_item(
-        itemtype, item_id,
-        expand_dropdowns=expand_dropdowns,
-        with_tickets=with_tickets,
-        with_documents=with_documents,
-        with_logs=with_logs,
-        with_notes=with_notes,
-        with_networkports=with_networkports,
-        with_contracts=with_contracts,
-        with_problems=with_problems,
-        with_changes=with_changes,
-        with_infocoms=with_infocoms,
-        with_devices=with_devices,
-        with_softwares=with_softwares,
-        with_connections=with_connections,
-        with_disks=with_disks,
-    ))
-
-
-@mcp.tool()
-def glpi_get_items(
-    itemtype: str,
-    range: str = "0-49",
-    sort: int = 1,
-    order: str = "ASC",
-    is_deleted: bool = False,
-    expand_dropdowns: bool = False,
-) -> str:
-    """List items of a given type (paginated).
-
-    Args:
-        itemtype: GLPI class name (e.g. "Ticket", "Computer", "User").
-        range: Pagination range as "start-end" (default "0-49").
-        sort: Field ID to sort by (default 1 = name).
-        order: "ASC" or "DESC".
-        is_deleted: Return items in the trashbin.
-        expand_dropdowns: Show names instead of IDs.
-    """
-    return _json(_get_client().get_items(
-        itemtype, range_str=range, sort=sort, order=order,
-        is_deleted=is_deleted, expand_dropdowns=expand_dropdowns,
-    ))
-
-
-@mcp.tool()
-def glpi_get_sub_items(
-    itemtype: str,
-    item_id: int,
-    sub_itemtype: str,
-    range: str = "0-49",
-) -> str:
-    """Get related sub-items of an item. E.g. Ticket/5/TicketFollowup, Computer/3/NetworkPort.
-
-    Args:
-        itemtype: Parent item type (e.g. "Ticket").
-        item_id: Parent item ID.
-        sub_itemtype: Related item type (e.g. "TicketFollowup", "TicketTask", "Log").
-        range: Pagination range as "start-end" (default "0-49").
-    """
-    return _json(_get_client().get_sub_items(itemtype, item_id, sub_itemtype, range_str=range))
 
 
 @mcp.tool()
@@ -241,9 +146,10 @@ def glpi_search_tickets(
     text: str | None = None,
     due_within_hours: int | None = None,
     range: str = "0-49",
-    order: str = "DESC",
 ) -> str:
     """Search tickets with name-based filters. Resolves names to IDs internally.
+
+    Results are always sorted by creation date ASC (oldest first — chronological reading order).
 
     For "tickets opened today": pass date_from="YYYY-MM-DD 00:00:00".
     For "tickets at risk of breaching SLA": combine due_within_hours=24 with status="open".
@@ -262,15 +168,14 @@ def glpi_search_tickets(
         text: Substring to match in ticket name/title.
         due_within_hours: Include only tickets with a due_date within N hours from now
             (captures already-breached + about-to-breach). Combine with status='open' for SLA-risk queries.
-        range: Pagination (default "0-49"). Sorted by creation date DESC by default.
-        order: "ASC" or "DESC".
+        range: Pagination (default "0-49").
     """
     return _json(_get_client().search_tickets(
         status=status, category=category, assignee=assignee, requester=requester,
         group=group, priority=priority, ticket_type=ticket_type, entity=entity,
         date_from=date_from, date_to=date_to, text=text,
         due_within_hours=due_within_hours,
-        range_str=range, order=order,
+        range_str=range,
     ))
 
 
@@ -296,48 +201,25 @@ def glpi_get_ticket_full(ticket_id: int) -> str:
     return _json(_get_client().get_ticket_full(ticket_id))
 
 
-@mcp.tool()
-def glpi_get_ticket_stats(
-    group_by: str = "status",
-    date_from: str | None = None,
-    date_to: str | None = None,
-    status: str | None = None,
-    category: str | None = None,
-    assignee: str | None = None,
-    entity: str | None = None,
-) -> str:
-    """Aggregate tickets by status/category/priority/assignee/type. Returns label-to-count map plus _total.
-
-    Args:
-        group_by: Field to group by — one of: "status", "category", "priority", "assignee", "type",
-            "requester", "entity", "assignee_group".
-        date_from: Optional ISO datetime lower bound on creation date.
-        date_to: Optional ISO datetime upper bound on creation date.
-        status/category/assignee/entity: Optional filters (same semantics as glpi_search_tickets).
-    """
-    return _json(_get_client().get_ticket_stats(
-        group_by=group_by, date_from=date_from, date_to=date_to,
-        status=status, category=category, assignee=assignee, entity=entity,
-    ))
-
-
 # --- Tier 2: Enrichment tools ---
 
 
 @mcp.tool()
-def glpi_list_categories(with_counts: bool = False) -> str:
-    """ITIL category tree with completename (full "Parent > Child" path). Optionally include ticket counts.
+def glpi_list_reference(with_counts: bool = False) -> str:
+    """ITIL reference data in one call: category tree + SLA + OLA definitions.
+
+    - categories: full category tree with 'completename' (Parent > Child paths).
+    - sla: customer-facing agreements (can be empty if the instance doesn't use SLAs).
+    - ola: internal agreements. Each has humanized `type` (TTR/TTO) and an `attached_categories`
+      list showing which ITIL categories route tickets to it.
+
+    One ITILCategory fetch is shared between the category listing and the SLA/OLA reverse-join,
+    so this costs 3 HTTP calls total (SLA + OLA + ITILCategory in parallel).
 
     Args:
-        with_counts: If true, include per-category ticket count (one extra search per category — slower).
+        with_counts: If true, include per-category ticket count (one extra search per category — slow).
     """
-    return _json(_get_client().list_categories(with_counts=with_counts))
-
-
-@mcp.tool()
-def glpi_list_sla_ola() -> str:
-    """List SLA (customer-facing) and OLA (internal) definitions with target times and attached categories."""
-    return _json(_get_client().list_sla_ola())
+    return _json(_get_client().list_reference(with_counts=with_counts))
 
 
 @mcp.tool()

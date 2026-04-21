@@ -1,9 +1,12 @@
 """GLPI REST API wrapper with session caching."""
 
 import concurrent.futures
+import html
 import json
 import os
+import re
 from datetime import datetime, timedelta
+from html.parser import HTMLParser
 from pathlib import Path
 
 import requests
@@ -15,6 +18,81 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _SESSION_FILE = Path(__file__).parent / ".session.json"
+
+
+# --- HTML decoding helpers ---
+# GLPI stores ticket/KB content double-encoded: raw bytes look like
+# "&#60;p&#62;Hello&#38;nbsp;&#60;/p&#62;" which is the HTML-escaped form of
+# "<p>Hello&nbsp;</p>". First pass reveals the tags, HTMLParser strips them
+# and decodes remaining entities (&nbsp; -> \xa0, etc).
+
+_STYLE_SCRIPT_RE = re.compile(
+    r"<(style|script)[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE,
+)
+_WS_RE = re.compile(r"\s+")
+
+
+class _HTMLTextStripper(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.convert_charrefs = True
+        self.chunks: list[str] = []
+
+    def handle_data(self, data):
+        self.chunks.append(data)
+
+
+def _html_to_text(raw) -> str:
+    """HTML (possibly double-encoded) -> plain text, whitespace collapsed.
+
+    Idempotent on plain text, correct on single- and double-encoded input.
+    """
+    if not isinstance(raw, str) or not raw:
+        return ""
+    unescaped = html.unescape(raw)
+    unescaped = _STYLE_SCRIPT_RE.sub("", unescaped)
+    parser = _HTMLTextStripper()
+    try:
+        parser.feed(unescaped)
+        parser.close()
+        text = "".join(parser.chunks)
+    except Exception:
+        # Malformed HTML — fall back to regex tag strip.
+        text = re.sub(r"<[^>]+>", " ", unescaped)
+    return _WS_RE.sub(" ", text).strip()
+
+
+def _decode_html(raw) -> str:
+    """Double-unescape GLPI's encoded HTML so tags and entities render normally."""
+    if not isinstance(raw, str) or not raw:
+        return ""
+    return html.unescape(html.unescape(raw))
+
+
+_CONTENT_FIELDS = ("content", "comment_submission", "comment_validation")
+
+
+def _decode_content_field(row: dict) -> dict:
+    """In-place: decode known HTML-bearing fields to plain text, keep HTML version under `<field>_html`."""
+    if isinstance(row, dict):
+        for field in _CONTENT_FIELDS:
+            raw = row.get(field)
+            if isinstance(raw, str) and raw:
+                row[field] = _html_to_text(raw)
+                row[f"{field}_html"] = _decode_html(raw)
+    return row
+
+
+def _strip_links(obj):
+    """Recursively drop 'links' keys (GLPI's REST self-reference arrays — useless to an AI consumer)."""
+    if isinstance(obj, dict):
+        obj.pop("links", None)
+        for v in obj.values():
+            _strip_links(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            _strip_links(item)
+    return obj
 
 # --- Ticket name → code maps (GLPI 11 standard) ---
 
@@ -165,12 +243,12 @@ class GLPIClient:
     def get_full_session(self) -> dict:
         resp = self._get("/getFullSession")
         resp.raise_for_status()
-        return resp.json()
+        return _strip_links(resp.json())
 
     def get_glpi_config(self) -> dict:
         resp = self._get("/getGlpiConfig")
         resp.raise_for_status()
-        return resp.json()
+        return _strip_links(resp.json())
 
     # --- CRUD read endpoints ---
 
@@ -187,7 +265,7 @@ class GLPIClient:
                 params[key] = "true"
         resp = self._get(f"/{itemtype}/{item_id}", params=params)
         resp.raise_for_status()
-        return resp.json()
+        return _strip_links(resp.json())
 
     def get_items(
         self,
@@ -211,7 +289,7 @@ class GLPIClient:
                 params[f"searchText[{field}]"] = value
         resp = self._get(f"/{itemtype}", params=params)
         resp.raise_for_status()
-        return resp.json()
+        return _strip_links(resp.json())
 
     def get_sub_items(
         self,
@@ -223,7 +301,7 @@ class GLPIClient:
         params = {"range": range_str}
         resp = self._get(f"/{itemtype}/{item_id}/{sub_itemtype}", params=params)
         resp.raise_for_status()
-        return resp.json()
+        return _strip_links(resp.json())
 
     def list_search_options(self, itemtype: str) -> dict:
         resp = self._get(f"/listSearchOptions/{itemtype}")
@@ -290,7 +368,7 @@ class GLPIClient:
                 params[f"forcedisplay[{i}]"] = field_id
         resp = self._get(f"/search/{itemtype}", params=params)
         resp.raise_for_status()
-        return resp.json()
+        return _strip_links(resp.json())
 
     # --- Name resolvers (cached) ---
 
@@ -414,10 +492,10 @@ class GLPIClient:
         text=None,
         due_within_hours: int | None = None,
         range_str: str = "0-49",
-        sort: int | None = None,
-        order: str = "DESC",
     ) -> dict:
         """High-level ticket search with name-based filters. Returns same shape as search_items.
+
+        Sort is hardcoded to creation date ASC (oldest first — chronological reading order).
 
         `due_within_hours`: include only tickets with due_date between epoch and now+N hours
         (captures already-breached + about-to-breach). Combine with status='open' for SLA-risk queries.
@@ -500,8 +578,8 @@ class GLPIClient:
             "Ticket",
             criteria=criteria or None,
             range_str=range_str,
-            sort=sort if sort is not None else TICKET_FIELDS["date_creation"],
-            order=order,
+            sort=TICKET_FIELDS["date_creation"],
+            order="ASC",
             forcedisplay=[2, 1, 7, 12, 3, 14, 15, 19, 4, 5],
         )
 
@@ -539,7 +617,7 @@ class GLPIClient:
             try:
                 items = self.get_sub_items(itemtype, item_id, sub_type, range_str="0-500")
                 if isinstance(items, list):
-                    return [{**row, "_kind": kind, "_sub_type": sub_type} for row in items]
+                    return [{**_decode_content_field(row), "_kind": kind, "_sub_type": sub_type} for row in items]
                 return []
             except requests.HTTPError as e:
                 return [{"_kind": kind, "_sub_type": sub_type, "_error": str(e)}]
@@ -592,7 +670,17 @@ class GLPIClient:
             item = future_item.result()
             sub_results = {s: f.result() for s, f in future_subs.items()}
 
-        # Compose timeline from the already-fetched event subs
+        # Decode HTML content on the top-level ticket and every sub-item that has a 'content' field.
+        _decode_content_field(item)
+        # Drop duplicated log dict — same rows are in `timeline` with _kind="log".
+        item.pop("_logs", None)
+        for sub_type in ("TicketFollowup", "TicketTask", "ITILSolution", "TicketValidation"):
+            rows = sub_results.get(sub_type)
+            if isinstance(rows, list):
+                for row in rows:
+                    _decode_content_field(row)
+
+        # Compose timeline from the already-decoded event subs
         timeline: list[dict] = []
         for kind, sub in (
             ("followup", "TicketFollowup"),
@@ -623,81 +711,74 @@ class GLPIClient:
             "linked_items": sub_results.get("Item_Ticket") or [],
         }
 
-    def get_ticket_stats(
-        self,
-        group_by: str = "status",
-        date_from: str | None = None,
-        date_to: str | None = None,
-        status=None,
-        category=None,
-        assignee=None,
-        entity=None,
-    ) -> dict:
-        """Count tickets grouped by status/category/priority/assignee/type. Returns {label: count, _total: N}."""
-        group_by_key = group_by.strip().lower()
-        field_id = TICKET_FIELDS.get(group_by_key)
-        if field_id is None:
-            raise ValueError(
-                f"group_by must be one of: status, category, priority, assignee, type, "
-                f"requester, entity, assignee_group (got {group_by!r})"
-            )
-
-        result = self.search_tickets(
-            status=status, category=category, assignee=assignee, entity=entity,
-            date_from=date_from, date_to=date_to,
-            range_str="0-5000",
-        )
-
-        counts: dict = {}
-        for row in result.get("data") or []:
-            raw = row.get(str(field_id)) or row.get(field_id)
-            if raw is None or raw == "":
-                label = "(none)"
-            else:
-                label = str(raw)
-                # Humanize known numeric codes
-                if group_by_key == "status":
-                    try:
-                        label = TICKET_STATUS_LABEL.get(int(raw), label)
-                    except (ValueError, TypeError):
-                        pass
-                elif group_by_key == "priority":
-                    try:
-                        label = PRIORITY_LABEL.get(int(raw), label)
-                    except (ValueError, TypeError):
-                        pass
-                elif group_by_key == "type":
-                    try:
-                        label = TICKET_TYPE_LABEL.get(int(raw), label)
-                    except (ValueError, TypeError):
-                        pass
-            counts[label] = counts.get(label, 0) + 1
-
-        sorted_counts = dict(sorted(counts.items(), key=lambda kv: kv[1], reverse=True))
-        sorted_counts["_total"] = result.get("totalcount", sum(counts.values()))
-        sorted_counts["_group_by"] = group_by_key
-        return sorted_counts
-
     # --- Tier 2: Enrichment tools ---
 
-    def list_categories(self, with_counts: bool = False) -> list[dict]:
-        """ITIL category tree with completename (hierarchy path). Optionally include ticket counts per leaf."""
-        raw = self.get_items(
-            "ITILCategory", range_str="0-1000",
-            sort="completename", order="ASC", expand_dropdowns=True,
-        )
-        if not isinstance(raw, list):
-            return []
-        result = []
-        for c in raw:
+    _SLA_TYPE_LABEL = {0: "TTO (time to own)", 1: "TTR (time to resolve)"}
+
+    def list_reference(self, with_counts: bool = False) -> dict:
+        """Return ITIL reference data in one pass: category tree + SLA/OLA definitions.
+
+        Shares one ITILCategory fetch between the category listing and the SLA/OLA reverse-join.
+        `with_counts=True` adds one extra Ticket search per category (slow on large trees).
+        """
+        def fetch(itemtype, range_str="0-200"):
+            try:
+                r = self.get_items(itemtype, range_str=range_str, expand_dropdowns=True)
+                return r if isinstance(r, list) else []
+            except requests.HTTPError:
+                return []
+
+        def fetch_categories():
+            # expand_dropdowns=False so itilcategories_id / slas_id_* / olas_id_* stay as ints
+            try:
+                r = self.get_items(
+                    "ITILCategory", range_str="0-1000",
+                    sort="completename", order="ASC", expand_dropdowns=False,
+                )
+                return r if isinstance(r, list) else []
+            except requests.HTTPError:
+                return []
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
+            sla_fut = ex.submit(fetch, "SLA")
+            ola_fut = ex.submit(fetch, "OLA")
+            cat_fut = ex.submit(fetch_categories)
+            slas = sla_fut.result()
+            olas = ola_fut.result()
+            cats = cat_fut.result()
+
+        # Reverse-join: agreement_id -> [category paths] via ITILCategory.slas_id_*/olas_id_*
+        sla_cats: dict[int, list[str]] = {}
+        ola_cats: dict[int, list[str]] = {}
+        for c in cats:
+            label = c.get("completename") or c.get("name") or f"cat#{c.get('id')}"
+            for key in ("slas_id_ttr", "slas_id_tto"):
+                sid = c.get(key)
+                if sid:
+                    sla_cats.setdefault(int(sid), []).append(label)
+            for key in ("olas_id_ttr", "olas_id_tto"):
+                oid = c.get(key)
+                if oid:
+                    ola_cats.setdefault(int(oid), []).append(label)
+
+        def clean_agreement(row: dict, bucket: dict[int, list[str]]) -> dict:
+            row.pop("links", None)
+            t = row.get("type")
+            if isinstance(t, int):
+                row["type"] = self._SLA_TYPE_LABEL.get(t, t)
+            row["attached_categories"] = bucket.get(int(row.get("id", 0)), [])
+            return row
+
+        categories: list[dict] = []
+        for c in cats:
             entry = {
                 "id": c.get("id"),
                 "name": c.get("name"),
                 "completename": c.get("completename") or c.get("name"),
                 "parent_id": c.get("itilcategories_id") or 0,
-                "level": c.get("level"),
-                "comment": c.get("comment"),
             }
+            if c.get("comment"):
+                entry["comment"] = c["comment"]
             if with_counts:
                 try:
                     s = self.search_items(
@@ -709,51 +790,50 @@ class GLPIClient:
                     entry["ticket_count"] = s.get("totalcount", 0)
                 except Exception:
                     entry["ticket_count"] = None
-            result.append(entry)
-        return result
+            categories.append(entry)
 
-    def list_sla_ola(self) -> dict:
-        """Return SLA and OLA definitions with target times and attached categories."""
-        def fetch(itemtype):
-            try:
-                r = self.get_items(itemtype, range_str="0-200", expand_dropdowns=True)
-                return r if isinstance(r, list) else []
-            except requests.HTTPError:
-                return []
+        return {
+            "categories": categories,
+            "sla": [clean_agreement(s, sla_cats) for s in slas],
+            "ola": [clean_agreement(o, ola_cats) for o in olas],
+        }
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
-            sla_fut = ex.submit(fetch, "SLA")
-            ola_fut = ex.submit(fetch, "OLA")
-            slas = sla_fut.result()
-            olas = ola_fut.result()
-        return {"SLA": slas, "OLA": olas}
+    # KnowbaseItem search-option IDs on this instance (name=6, answer=7 — confirmed empirically).
+    _KB_ID_FIELD = 2
+    _KB_NAME_FIELD = 6
+    _KB_ANSWER_FIELD = 7
 
     def search_knowbase(self, query: str, range_str: str = "0-20") -> dict:
-        """Search knowledge base articles by title and content. Field IDs resolved dynamically per GLPI version."""
-        opts = self._get_search_options_map("KnowbaseItem")
-        name_field = opts.get("name") or opts.get("tema") or opts.get("subject") or opts.get("title")
-        answer_field = opts.get("answer") or opts.get("contenido") or opts.get("content")
-        id_field = opts.get("id") or 2
+        """Search KB articles; returns a clean {totalcount, articles:[{id,title,body_html,body_text}]} shape."""
+        id_f, name_f, ans_f = self._KB_ID_FIELD, self._KB_NAME_FIELD, self._KB_ANSWER_FIELD
 
-        if name_field is None:
-            raise RuntimeError("Could not locate KnowbaseItem 'name' field in listSearchOptions")
-
-        criteria = [{"field": name_field, "searchtype": "contains", "value": query}]
-        if answer_field is not None:
-            criteria.append({
-                "field": answer_field, "searchtype": "contains", "value": query, "link": "OR",
-            })
-
-        forcedisplay = [id_field, name_field]
-        if answer_field is not None:
-            forcedisplay.append(answer_field)
-
-        return self.search_items(
+        criteria = [
+            {"field": name_f, "searchtype": "contains", "value": query},
+            {"field": ans_f, "searchtype": "contains", "value": query, "link": "OR"},
+        ]
+        raw = self.search_items(
             "KnowbaseItem",
             criteria=criteria,
             range_str=range_str,
-            forcedisplay=forcedisplay,
+            forcedisplay=[id_f, name_f, ans_f],
         )
+
+        articles = []
+        for row in raw.get("data") or []:
+            raw_title = row.get(str(name_f)) or row.get(name_f) or ""
+            raw_body = row.get(str(ans_f)) or row.get(ans_f) or ""
+            articles.append({
+                "id": row.get(str(id_f)) or row.get(id_f),
+                "title": _html_to_text(raw_title),
+                "body_html": _decode_html(raw_body),
+                "body_text": _html_to_text(raw_body),
+            })
+
+        return {
+            "totalcount": raw.get("totalcount", len(articles)),
+            "count": raw.get("count", len(articles)),
+            "articles": articles,
+        }
 
     def download_document(self, document_id: int) -> tuple[bytes, str, str]:
         """Download a document's raw bytes. Returns (data, filename, mime). Raises if GLPI returns its HTML error page."""
@@ -802,13 +882,13 @@ class GLPIClient:
 
         def fetch_opened():
             try:
-                return self.search_tickets(requester=user_id, range_str="0-20")
+                return self.search_tickets(requester=user_id, range_str="0-20").get("data") or []
             except Exception as e:
                 return {"_error": str(e)}
 
         def fetch_assigned():
             try:
-                return self.search_tickets(assignee=user_id, range_str="0-20")
+                return self.search_tickets(assignee=user_id, range_str="0-20").get("data") or []
             except Exception as e:
                 return {"_error": str(e)}
 
