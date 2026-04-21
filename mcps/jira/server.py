@@ -31,6 +31,11 @@ Jira Cloud requires a bounded JQL query — always include at least one constrai
 (project = X, created >= -30d, assignee = currentUser(), status = "Open", etc.)
 before any ORDER BY.
 
+All listing tools (jira_search_issues, jira_search_users, jira_list_boards,
+jira_list_board_sprints, jira_get_sprint_issues) auto-paginate and return the
+full result set as {count, <key>}. There are no limit / start / nextPageToken
+flags — scope the query itself if you need to narrow results.
+
 jira_get_issue returns the full ticket in one call: base fields + changelog +
 status history + comments + worklog + watchers + attachments + available
 transitions. Don't fan out into multiple sub-calls — everything is inlined.
@@ -53,15 +58,13 @@ When presenting issues, format as:
 def jira_search_issues(
     jql: str,
     fields: str = "summary,status,priority,issuetype,assignee,reporter,created,updated,resolution,labels,project,parent",
-    limit: int = 25,
-    next_page_token: Optional[str] = None,
     expand: Optional[str] = None,
     slim: bool = True,
 ) -> dict:
     """Search Jira issues with JQL. Must include at least one filter clause
-    (Cloud rejects unbounded queries). Returns {isLast, nextPageToken, issues}.
-    To fetch the next page, pass the nextPageToken from the previous response."""
-    return j.search_issues(jql, fields=fields, limit=limit, next_page_token=next_page_token, expand=expand, slim=slim)
+    (Cloud rejects unbounded queries). Auto-paginates and returns every match
+    as {count, issues}."""
+    return j.search_issues(jql, fields=fields, expand=expand, slim=slim)
 
 
 @mcp.tool
@@ -76,6 +79,15 @@ def jira_get_issue(key: str) -> dict:
 def jira_get_attachment(attachment_id: str) -> Any:
     """Get metadata for a single attachment by ID (mime type, size, URL)."""
     return j.get_attachment(attachment_id)
+
+
+@mcp.tool
+def jira_download_attachments(attachment_ids: list[str]) -> dict:
+    """Download one or more attachments and save each to ~/Downloads under its
+    original filename. Pass every ID you need in a single call — this is the
+    preferred shape so you only trigger one approval. Returns
+    {count, downloads: [{attachment_id, path, filename, size, mime} | {attachment_id, error}]}."""
+    return j.download_attachments(attachment_ids)
 
 
 # ---------- projects ----------
@@ -96,9 +108,10 @@ def jira_get_project(key: str) -> dict:
 # ---------- users ----------
 
 @mcp.tool
-def jira_search_users(query: str, start: int = 0, limit: int = 25) -> Any:
-    """Search users by display name or email."""
-    return j.search_users(query, start=start, limit=limit)
+def jira_search_users(query: str) -> dict:
+    """Search users by display name or email. Auto-paginates; returns every
+    match as {count, users}."""
+    return j.search_users(query)
 
 
 @mcp.tool
@@ -115,16 +128,12 @@ def jira_list_boards(
     board_name: Optional[str] = None,
     project_key: Optional[str] = None,
     board_type: Optional[str] = None,
-    start: int = 0,
-    limit: int = 50,
-) -> Any:
-    """List agile boards (scrum/kanban)."""
+) -> dict:
+    """List agile boards (scrum/kanban). Auto-paginates; returns {count, boards}."""
     return j.list_boards(
         board_name=board_name,
         project_key=project_key,
         board_type=board_type,
-        start=start,
-        limit=limit,
     )
 
 
@@ -132,11 +141,10 @@ def jira_list_boards(
 def jira_list_board_sprints(
     board_id: int,
     state: Optional[str] = None,
-    start: int = 0,
-    limit: int = 50,
-) -> Any:
-    """List sprints on a board. state = active | closed | future."""
-    return j.list_board_sprints(board_id, state=state, start=start, limit=limit)
+) -> dict:
+    """List sprints on a board. state = active | closed | future.
+    Auto-paginates; returns {count, sprints}."""
+    return j.list_board_sprints(board_id, state=state)
 
 
 @mcp.tool
@@ -145,17 +153,14 @@ def jira_get_sprint_issues(
     sprint_id: int,
     jql: str = "",
     fields: str = "summary,status,assignee,priority",
-    start: int = 0,
-    limit: int = 50,
-) -> Any:
-    """Get all issues in a sprint for a given board."""
+) -> dict:
+    """Get all issues in a sprint for a given board. Auto-paginates;
+    returns {count, issues}."""
     return j.get_sprint_issues(
         board_id=board_id,
         sprint_id=sprint_id,
         jql=jql,
         fields=fields,
-        start=start,
-        limit=limit,
     )
 
 

@@ -74,8 +74,6 @@ def slim_issue(iss: dict) -> dict:
 def search_issues(
     jql: str,
     fields: str = "summary,status,priority,issuetype,assignee,reporter,created,updated,resolution,labels,project,parent",
-    limit: int = 25,
-    next_page_token: Optional[str] = None,
     expand: Optional[str] = None,
     slim: bool = True,
 ) -> dict:
@@ -89,23 +87,29 @@ def search_issues(
             "before any ORDER BY."
         )
 
-    # Use enhanced_jql (Cloud-native /rest/api/3/search/jql). The old jql()
-    # hits the deprecated /rest/api/2/search which no longer returns total /
-    # startAt / maxResults on Cloud. enhanced_jql returns nextPageToken + isLast
-    # and those ARE populated. Pass nextPageToken (received from a prior call)
-    # to fetch the next page.
-    result = _jira.enhanced_jql(
-        jql,
-        fields=fields,
-        nextPageToken=next_page_token,
-        limit=limit,
-        expand=expand,
-    ) or {}
-    issues = result.get("issues", []) or []
+    # Use enhanced_jql (Cloud-native /rest/api/3/search/jql). Cloud's old
+    # /rest/api/2/search dropped total/startAt/maxResults, so we page with
+    # nextPageToken instead. Loop until isLast to return every match.
+    all_issues: list = []
+    next_token: Optional[str] = None
+    while True:
+        result = _jira.enhanced_jql(
+            jql,
+            fields=fields,
+            nextPageToken=next_token,
+            limit=100,
+            expand=expand,
+        ) or {}
+        page = result.get("issues", []) or []
+        all_issues.extend(page)
+        if result.get("isLast"):
+            break
+        next_token = result.get("nextPageToken")
+        if not next_token:
+            break
     return {
-        "isLast": result.get("isLast"),
-        "nextPageToken": result.get("nextPageToken"),
-        "issues": [slim_issue(i) for i in issues] if slim else issues,
+        "count": len(all_issues),
+        "issues": [slim_issue(i) for i in all_issues] if slim else all_issues,
     }
 
 
@@ -127,6 +131,34 @@ def get_issue_full(key: str) -> dict:
 
 def get_attachment(attachment_id: str) -> Any:
     return _jira.get_attachment(attachment_id)
+
+
+def download_attachments(attachment_ids: list[str]) -> dict:
+    """Fetch one or more attachments and save each to ~/Downloads under its
+    original filename. One bad ID doesn't abort the batch — the failing entry
+    gets an `error` field and the rest proceed. Returns {count, downloads}."""
+    target_dir = Path.home() / "Downloads"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    results: list[dict] = []
+    for aid in attachment_ids:
+        try:
+            meta = _jira.get_attachment(aid) or {}
+            filename = meta.get("filename") or f"jira_attachment_{aid}.bin"
+            mime = meta.get("mimeType")
+            content = _jira.get_attachment_content(aid)
+            data = content if isinstance(content, (bytes, bytearray)) else str(content).encode("latin-1")
+            path = target_dir / filename
+            path.write_bytes(data)
+            results.append({
+                "attachment_id": aid,
+                "path": str(path),
+                "filename": filename,
+                "size": len(data),
+                "mime": mime,
+            })
+        except Exception as e:
+            results.append({"attachment_id": aid, "error": f"{type(e).__name__}: {e}"})
+    return {"count": len(results), "downloads": results}
 
 
 # ---------- projects ----------
@@ -154,8 +186,17 @@ def get_project_full(key: str) -> dict:
 
 # ---------- users ----------
 
-def search_users(query: str, start: int = 0, limit: int = 25) -> Any:
-    return _jira.user_find_by_user_string(query=query, start=start, limit=limit)
+def search_users(query: str) -> dict:
+    results: list = []
+    start = 0
+    page = 50
+    while True:
+        batch = _jira.user_find_by_user_string(query=query, start=start, limit=page) or []
+        results.extend(batch)
+        if len(batch) < page:
+            break
+        start += page
+    return {"count": len(results), "users": results}
 
 
 def get_myself() -> Any:
@@ -167,24 +208,46 @@ def get_myself() -> Any:
 
 # ---------- agile ----------
 
+def _paginate_agile(fetch) -> list:
+    """Walk a Jira Agile paged endpoint (uses `values` + `isLast` + `startAt`)
+    until exhausted. `fetch(start, page)` must return the raw API dict."""
+    out: list = []
+    start = 0
+    page = 50
+    while True:
+        resp = fetch(start, page) or {}
+        values = resp.get("values", []) or []
+        out.extend(values)
+        if resp.get("isLast") is True or len(values) < page:
+            break
+        start += page
+    return out
+
+
 def list_boards(
     board_name: Optional[str] = None,
     project_key: Optional[str] = None,
     board_type: Optional[str] = None,
-    start: int = 0,
-    limit: int = 50,
-) -> Any:
-    return _jira.get_all_agile_boards(
-        board_name=board_name,
-        project_key=project_key,
-        board_type=board_type,
-        start=start,
-        limit=limit,
+) -> dict:
+    boards = _paginate_agile(
+        lambda start, page: _jira.get_all_agile_boards(
+            board_name=board_name,
+            project_key=project_key,
+            board_type=board_type,
+            start=start,
+            limit=page,
+        )
     )
+    return {"count": len(boards), "boards": boards}
 
 
-def list_board_sprints(board_id: int, state: Optional[str] = None, start: int = 0, limit: int = 50) -> Any:
-    return _jira.get_all_sprints_from_board(board_id, state=state, start=start, limit=limit)
+def list_board_sprints(board_id: int, state: Optional[str] = None) -> dict:
+    sprints = _paginate_agile(
+        lambda start, page: _jira.get_all_sprints_from_board(
+            board_id, state=state, start=start, limit=page
+        )
+    )
+    return {"count": len(sprints), "sprints": sprints}
 
 
 def get_sprint_issues(
@@ -192,17 +255,30 @@ def get_sprint_issues(
     sprint_id: int,
     jql: str = "",
     fields: str = "summary,status,assignee,priority",
-    start: int = 0,
-    limit: int = 50,
-) -> Any:
-    return _jira.get_all_issues_for_sprint_in_board(
-        board_id=board_id,
-        sprint_id=sprint_id,
-        jql=jql,
-        fields=fields,
-        start=start,
-        limit=limit,
-    )
+) -> dict:
+    # The sprint-issues endpoint pages with startAt/maxResults/total, exposing
+    # `issues` (not `values`) — so we can't reuse _paginate_agile directly.
+    all_issues: list = []
+    start = 0
+    page = 50
+    while True:
+        resp = _jira.get_all_issues_for_sprint_in_board(
+            board_id=board_id,
+            sprint_id=sprint_id,
+            jql=jql,
+            fields=fields,
+            start=start,
+            limit=page,
+        ) or {}
+        batch = resp.get("issues", []) or []
+        all_issues.extend(batch)
+        total = resp.get("total")
+        if total is not None and len(all_issues) >= total:
+            break
+        if len(batch) < page:
+            break
+        start += page
+    return {"count": len(all_issues), "issues": all_issues}
 
 
 # ---------- metadata ----------
