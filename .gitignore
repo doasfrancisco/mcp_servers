@@ -57,6 +57,9 @@ venv/
 # Claude Code
 .claude/
 
+# Entire (checkpoint/search tool state)
+.entire/
+
 # OS files
 .DS_Store
 Thumbs.db

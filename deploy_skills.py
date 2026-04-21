@@ -12,10 +12,26 @@ DESTINATIONS = {
     "droid": Path.home() / ".factory" / "skills",
 }
 
-RED = "\033[31m"
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-RESET = "\033[0m"
+def _supports_color():
+    """Check if the terminal supports ANSI color codes."""
+    if not sys.stdout.isatty():
+        return False
+    if sys.platform == "win32":
+        # Windows 10+ supports ANSI if virtual terminal processing is enabled.
+        # os.system("") is a known trick to flip the flag on.
+        try:
+            os.system("")
+            return True
+        except Exception:
+            return False
+    return True
+
+
+_COLOR = _supports_color()
+RED = "\033[31m" if _COLOR else ""
+GREEN = "\033[32m" if _COLOR else ""
+YELLOW = "\033[33m" if _COLOR else ""
+RESET = "\033[0m" if _COLOR else ""
 
 
 def available_skills():
