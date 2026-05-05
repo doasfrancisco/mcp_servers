@@ -193,3 +193,20 @@ ok now tell me which files are no longer needed at @mcps/obsidian\
 ---
 
 and update fastmcp version at @new_mcp_guidelines.md
+
+---
+
+delete "  ┌────────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+  │        File        │                                                          Why it can go                                                          │
+  ├────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ setup_layout.py    │ Scaffolded the initial folder layout + the 5 READMEs. The vault is now structured by extract_book.py, and the READMEs were      │
+  │                    │ already deleted by cleanup_readmes.py. Pure legacy.                                                                             │
+  ├────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ cleanup_readmes.py │ One-shot to delete those READMEs and rewrite wiki/index.md. Already executed; the files it targets no longer exist. Re-running  │
+  │                    │ would be a no-op.                                                                                                               │
+  ├────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ ingest_pdf.py      │ Single-PDF uploader for one hardcoded book. Fully superseded by extract_book.py, which handles multi-PDF books, frontmatter,    │
+  │                    │ sample-probe, and idempotent re-runs.                                                                                           │
+  ├────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ test_obsidian.py   │ Original Peano-axioms prototype that established the bearer-auth pattern. The pattern now lives in obsidian_client.py and       │
+  │                    │ test_server.py exercises the real server. Pure legacy.  " and test server and extract book.py
