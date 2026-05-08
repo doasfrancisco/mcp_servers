@@ -33,10 +33,14 @@ sudo apt install -y xvfb x11vnc libgtk-3-0 libnotify4 libnss3 libxss1 \
 
 ## Step 2: Install Beeper Desktop
 
+Download the versioned AppImage, then symlink it to a stable filename (`Beeper.AppImage`). The systemd unit and all docs reference the symlink — when Beeper updates, you only retarget the symlink, no unit edit, no `daemon-reload`. Skipping the symlink leaves the unit hardcoded to a version that will eventually disappear and put `beeper.service` into an infinite `status=203/EXEC` restart loop.
+
 ```bash
 cd ~/Downloads
-wget -O Beeper-4.2.742-x86_64.AppImage "https://download.beeper.com/linux/appImage/x64"
-chmod +x Beeper-4.2.742-x86_64.AppImage
+# Find the current version at https://download.beeper.com/linux/appImage/x64 (it 302-redirects to the versioned URL)
+wget -O Beeper-4.2.785-x86_64.AppImage "https://download.beeper.com/linux/appImage/x64"
+chmod +x Beeper-4.2.785-x86_64.AppImage
+ln -sf Beeper-4.2.785-x86_64.AppImage Beeper.AppImage
 ```
 
 ## Step 3: One-time Beeper authentication (requires RDP)
@@ -44,7 +48,7 @@ chmod +x Beeper-4.2.742-x86_64.AppImage
 RDP into the VPS and launch Beeper from a terminal:
 
 ```bash
-./Downloads/Beeper-4.2.742-x86_64.AppImage --no-sandbox
+./Downloads/Beeper.AppImage --no-sandbox
 ```
 
 In Beeper:
@@ -107,7 +111,7 @@ export DISPLAY=:99
 Xvfb :99 -screen 0 1280x720x24 &
 
 # Start Beeper
-./Downloads/Beeper-4.2.742-x86_64.AppImage --no-sandbox &
+./Downloads/Beeper.AppImage --no-sandbox &
 
 # Wait for Beeper to initialize
 sleep 15
@@ -160,7 +164,7 @@ Requires=xvfb.service
 [Service]
 User=<your-username>
 Environment=DISPLAY=:99
-ExecStart=/home/<your-username>/Downloads/Beeper-4.2.742-x86_64.AppImage --no-sandbox
+ExecStart=/home/<your-username>/Downloads/Beeper.AppImage --no-sandbox
 Restart=always
 RestartSec=5
 
@@ -311,6 +315,26 @@ Or use the systemd xvfb service.
 ### `Archive format is not recognized` (xarchiver popup)
 
 The `.AppImage` file was double-clicked in a file manager. It's not an archive — it's an executable. Run it from the terminal with `chmod +x` and `./Beeper-*.AppImage --no-sandbox`.
+
+### `beeper.service` in restart loop with `status=203/EXEC`
+
+Beeper got updated and the old AppImage filename no longer exists, but the systemd unit still points at it. Check the symlink target:
+
+```bash
+ls -la ~/Downloads/Beeper.AppImage
+sudo systemctl status beeper --no-pager | head -10
+```
+
+If the symlink is broken (or the unit was set up before this guide added the symlink), retarget it to the current AppImage and reset the failure counter:
+
+```bash
+cd ~/Downloads
+ln -sf Beeper-<new-version>-x86_64.AppImage Beeper.AppImage
+sudo systemctl reset-failed beeper
+sudo systemctl restart beeper whatsapp-mcp
+```
+
+This is also the procedure for routine Beeper version bumps — download the new AppImage, retarget the symlink, restart. No unit edit needed.
 
 ### `APIConnectionError: Connection error` in MCP logs
 

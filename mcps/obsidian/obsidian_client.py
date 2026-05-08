@@ -76,11 +76,11 @@ class ObsidianClient:
         r.raise_for_status()
         return r.text
 
-    def write_text(self, path: str, body: str) -> int:
+    def write_bytes(self, path: str, body: bytes, content_type: str) -> int:
         r = self._session.put(
             self._url(path),
-            data=body.encode("utf-8"),
-            headers={"Content-Type": "text/markdown"},
+            data=body,
+            headers={"Content-Type": content_type},
             timeout=30,
         )
         r.raise_for_status()
@@ -174,12 +174,41 @@ def extract_frontmatter_links(fm: dict) -> list[str]:
 _KNOWN_EXTS = (".md", ".pdf", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".gif")
 
 
-def resolve_link(target: str, all_files: list[str]) -> str | None:
+def _pick_nearest(candidates: list[str], source_path: str | None) -> str:
+    """Choose the candidate with the longest shared folder prefix to
+    `source_path`. Mirrors Obsidian's shortest-path link resolution.
+
+    Ties (or no source given) → first candidate by sorted order.
+    """
+    if not source_path or len(candidates) == 1:
+        return sorted(candidates)[0]
+
+    src_folder = source_path.split("/")[:-1]
+
+    def shared_depth(path: str) -> int:
+        cand_folder = path.split("/")[:-1]
+        depth = 0
+        for a, b in zip(src_folder, cand_folder):
+            if a == b:
+                depth += 1
+            else:
+                break
+        return depth
+
+    return max(sorted(candidates), key=shared_depth)
+
+
+def resolve_link(
+    target: str,
+    all_files: list[str],
+    source_path: str | None = None,
+) -> str | None:
     """Resolve a wikilink target to a vault-relative path, or None if ghost.
 
     Path-style targets (`folder/file`) are matched as exact paths, with .md
     appended when no recognized extension is present. Bare targets are
-    resolved by basename across all .md files.
+    resolved by basename across all .md files; ties are broken by
+    proximity to `source_path` (longest shared folder prefix wins).
     """
     target = target.strip()
     if not target:
@@ -195,30 +224,48 @@ def resolve_link(target: str, all_files: list[str]) -> str | None:
         return None
 
     # Bare basename — match any .md whose stem == target
-    for f in all_files:
-        if f.endswith(f"/{target}.md") or f == f"{target}.md":
-            return f
+    md_matches = [
+        f for f in all_files
+        if f.endswith(f"/{target}.md") or f == f"{target}.md"
+    ]
+    if md_matches:
+        return _pick_nearest(md_matches, source_path)
+
     # Or any file that matches verbatim (rare)
-    for f in all_files:
-        if f.endswith(f"/{target}") or f == target:
-            return f
+    other_matches = [
+        f for f in all_files
+        if f.endswith(f"/{target}") or f == target
+    ]
+    if other_matches:
+        return _pick_nearest(other_matches, source_path)
+
     return None
 
 
 # ── Graph builder ─────────────────────────────────────────────────────
 
 
+_IMAGE_CLASSIFY_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".svg", ".gif")
+
+
 def _classify(path: str) -> str:
-    if path.lower().endswith(".pdf"):
+    lower = path.lower()
+    if lower.endswith(".pdf"):
         return "pdf"
-    if not path.lower().endswith(".md"):
+    if lower.endswith(_IMAGE_CLASSIFY_EXTS):
+        return "image"
+    if not lower.endswith(".md"):
         return "other"
     parts = path.split("/")
     # raw/<book>/<book>.md → hub (basename matches folder name)
     if len(parts) == 3 and parts[0] == "raw" and parts[2] == f"{parts[1]}.md":
         return "hub"
-    if parts[-1] == "notes.md":
+    # raw/<book>/notes.md → notes (index hub for atomic notes)
+    if len(parts) == 3 and parts[0] == "raw" and parts[2] == "notes.md":
         return "notes"
+    # raw/<book>/notes/<slug>.md → note (atomic note)
+    if len(parts) == 4 and parts[0] == "raw" and parts[2] == "notes":
+        return "note"
     return "other_md"
 
 
@@ -279,17 +326,17 @@ def build_graph(client: ObsidianClient, root: str = "raw") -> dict:
         node: dict[str, Any] = {"path": path, "type": kind}
         if kind == "pdf":
             node.update(_pdf_meta_for(path, hub_index))
-        elif kind in ("hub", "notes", "other_md"):
-            fm = md_data.get(path, {}).get("fm") or {}
+        elif path in md_data:
+            fm = md_data[path].get("fm") or {}
             if fm:
                 node["frontmatter"] = fm
         nodes.append(node)
 
-    # Pass 3: resolve edges.
+    # Pass 3: resolve edges (folder-aware via source_path).
     edges = []
     for path, data in md_data.items():
         for target, kind in data["body_links"]:
-            resolved = resolve_link(target, files)
+            resolved = resolve_link(target, files, source_path=path)
             edges.append({
                 "from": path,
                 "to": resolved or target,
@@ -297,7 +344,7 @@ def build_graph(client: ObsidianClient, root: str = "raw") -> dict:
                 "target_exists": resolved is not None,
             })
         for target in data["fm_links"]:
-            resolved = resolve_link(target, files)
+            resolved = resolve_link(target, files, source_path=path)
             edges.append({
                 "from": path,
                 "to": resolved or target,

@@ -1,9 +1,12 @@
 """Obsidian MCP — books knowledge base.
 
 Three tools:
-    raw_graph()           graph of raw/ — nodes (md+pdf) + edges (wikilinks, embeds, fm)
-    read(path)            read a .md file
-    write(path, content)  write a .md file (full overwrite)
+    raw_graph()                              graph of raw/ — md+pdf+image
+                                             nodes + wikilink/embed/fm edges
+    read(path)                               read a .md file
+    write(path, content="", image_path=...)  write a .md (content=) or
+                                             image (image_path=, server
+                                             reads bytes from local disk)
 
 PDFs are visible in the graph but not readable through this server. The
 markdown layer is the human↔AI channel.
@@ -31,69 +34,90 @@ from fastmcp import FastMCP
 mcp = FastMCP(
     "Obsidian",
     instructions="""Personal Obsidian KB of math + CS books. Layout:
-  raw/<book>/<book>.md   (hub: YAML frontmatter + nav callout + summary)
-  raw/<book>/*.pdf       (sources: textbook, solutions, errata, ...)
-  raw/<book>/notes.md    (single dated journal across all sources)
-  wiki/                  (LLM-compiled output — write here only on
-                          explicit "compile" / "rebuild concepts" requests)
+  raw/<book>/<book>.md          (hub: frontmatter + nav callout + summary)
+  raw/<book>/*.pdf              (sources: textbook, solutions, errata, ...)
+  raw/<book>/notes.md           (notes INDEX: frontmatter `book: [[X]]`,
+                                  body minimal — children link UP to it)
+  raw/<book>/notes/<slug>.md    (atomic notes: frontmatter
+                                  `parent: [[notes]]` only — book is
+                                  reached transitively via notes)
+  attachments/<book>/*.png|jpg  (screenshots, diagrams)
+  wiki/                         (LLM-compiled output — only on explicit
+                                  "compile" / "rebuild concepts" requests)
 
 THREE TOOLS:
-  raw_graph()           full graph of raw/ — nodes + edges
-  read(path)            read a .md file
-  write(path, content)  write a .md file (full overwrite)
+  raw_graph()                              full graph of raw/
+  read(path)                               read a .md file
+  write(path, content="",                  write a .md (use content=) or
+        image_path=None)                   an image (use image_path=)
 
 IMPORTANT: discover schemas with ToolSearch before first call.
 
 ALWAYS START WITH raw_graph. Don't read blindly. The graph tells you
-what exists, the node types (hub|notes|pdf|other_md), the wikilinks,
-and which links are ghosts (target_exists: false). All read/write
-decisions follow from it.
+what exists, node types (hub|notes|note|other_md|pdf|image), the
+wikilinks, and which links are ghosts (target_exists: false). All
+read/write decisions follow from it.
+
+NOTES MODEL — ATOMIC, ZETTELKASTEN-STYLE:
+  - notes.md is an INDEX node. Frontmatter `book: [[X]]`, body minimal
+    (a tagline at most). DO NOT pile entries into notes.md.
+  - Each thought lives in raw/<book>/notes/<slug>.md with frontmatter
+    `parent: [[notes]]` ONLY — no `book:` field. The book is reached
+    transitively (atomic note → notes → book), no direct edge.
+  - Slug is kebab-case from the concept name (e.g.
+    inyectividad-y-predecesores.md). Optional metadata in frontmatter:
+    `created`, `chapter`, `section`.
+  - notes.md does NOT need to list children — Obsidian shows backlinks
+    automatically via the children's `parent: [[notes]]` edge.
+  - Adding a note flow: (1) raw_graph, (2) read existing notes whose
+    titles touch the same concept, (3) decide:
+        a) belongs in an existing note → read it, append, write back
+        b) distinct concept           → create new <slug>.md
 
 PDFS ARE NOT READABLE. They appear in the graph as nodes (with page
-count + extractable flag from the sibling hub's sources[]) so you know
-they exist, but `read` is .md-only. If the user asks "what does ch.3 of
-Lages say?", you cannot answer from the PDF directly. Offer to: (a) read
-their notes.md for what they wrote about ch.3, (b) summarize what the
-hub already records, or (c) ask them to paste the passage into notes.md.
-Do not pretend to have read the PDF.
+count + extractable from the sibling hub's sources[]) so you know they
+exist, but `read` is .md-only. If asked "what does ch.3 of Lages say?",
+you cannot answer from the PDF. Offer to: (a) search atomic notes that
+reference ch.3, (b) summarize what the hub records, (c) ask the user
+to paste the passage. Do not pretend to have read the PDF.
 
-APPEND = READ-MODIFY-WRITE. `write` is a full overwrite. To add a
-journal entry to notes.md, you MUST read it first, append the new entry
-to the existing body, then write the whole thing back. Never write
-partial content — you'll silently destroy prior entries.
+SCREENSHOTS / IMAGES:
+  - Vault path: attachments/<book>/<yyyy-mm-dd>-<slug>.png|jpg|webp
+  - User pastes a screenshot or hands you a local fs path. Use Bash to
+    locate it on disk if needed, then call:
+        write(path="attachments/Lages/2026-05-04-inyectividad.png",
+              image_path="C:/Users/.../screenshot.png")
+  - Reference from a note with `![[2026-05-04-inyectividad.png]]`.
+  - Allowed extensions: .png .jpg .jpeg .webp.
 
-PRESERVE FRONTMATTER. When editing any .md, never drop, reorder, or
-silently mutate the YAML frontmatter unless the user explicitly asked
-for it. Frontmatter holds the queryable schema (status, sources,
-ingested_at, tags) — it's not decoration. Same for the nav callout in
-hub pages — it's the connectivity backbone for the graph.
+APPEND = READ-MODIFY-WRITE. `write` is a full overwrite for .md. To
+extend an existing atomic note, read first, modify in memory, write
+the whole thing back. Partial writes destroy what's there.
 
-WIKILINK HYGIENE. When you write content that references a book or
-concept, use [[Exact Basename]] from raw_graph. Don't invent ghost
-links unless intentional. If you're forced to reference something that
-doesn't exist yet, mention it explicitly: "this links to a concept page
-that doesn't exist — want me to create it?"
+PRESERVE FRONTMATTER. Never drop, reorder, or silently mutate YAML
+frontmatter unless asked. Frontmatter is the queryable schema and the
+edge backbone of the graph (parent, book, status, sources, tags).
+Same for nav callouts in hubs.
 
-NO NEW TOP-LEVEL FOLDERS. Only raw/, wiki/, attachments/ exist by
-design. New books go in raw/<book>/. New concepts go in wiki/concepts/.
-Don't invent siblings of these.
+WIKILINK HYGIENE. Use [[Exact Basename]] from raw_graph. Don't invent
+ghost links. If you must reference something that doesn't exist, say
+so explicitly and offer to create it.
 
-JOURNAL APPEND FORMAT. notes.md uses dated headings:
-    ## YYYY-MM-DD — ch.N §M
-    {user's prose, verbatim — don't paraphrase}
-Always include chapter/section if the user names them.
+NO NEW TOP-LEVEL FOLDERS. Only raw/, wiki/, attachments/ by design.
+New books go in raw/<book>/. New atomic notes go in raw/<book>/notes/.
+Don't invent siblings.
 
-CONFIRM BEFORE WRITE. Writes are persistent and overwriting. Tell the
-user the path and a short summary of what's changing, then stop your
-turn and wait for confirmation. Exception: if the user pre-authorized
-("just log this", "append this thought"), proceed without re-asking.
+CONFIRM BEFORE WRITE. Tell the user the path, the mode (.md content vs
+image), and a one-line summary. Stop. Wait for confirmation. Exception:
+if pre-authorized ("just log this"), proceed.
 
-PRESENTATION when showing the graph to the user:
+PRESENTATION when showing the graph:
 - Group by folder (one section per book in raw/)
 - For each book: **Title** — Author · status · sources (mark "needs OCR"
   if all sources are unextractable)
+- For each book: list of atomic notes with one-line summaries
 - Surface ghost links explicitly — they're gaps in the KB
-- Don't dump the raw JSON; render it as prose + nested lists.
+- Don't dump raw JSON; render as prose + nested lists.
 """,
 )
 
@@ -108,6 +132,20 @@ def _get_client() -> ObsidianClient:
     return _client
 
 
+_MIME = {
+    ".md": "text/markdown",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
+_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def _ext(path: str) -> str:
+    return "." + path.rsplit(".", 1)[-1].lower() if "." in path else ""
+
+
 def _normalize(path: str) -> str:
     p = path.replace("\\", "/").lstrip("/")
     if not p:
@@ -115,20 +153,24 @@ def _normalize(path: str) -> str:
     parts = p.split("/")
     if any(part in ("..", "") for part in parts):
         raise ValueError(f"invalid path: {path!r}")
-    if not p.lower().endswith(".md"):
-        raise ValueError(f"only .md paths are allowed; got {path!r}")
+    if _ext(p) not in _MIME:
+        raise ValueError(
+            f"unsupported extension for {path!r}; "
+            f"allowed: {', '.join(_MIME.keys())}"
+        )
     return p
 
 
 @mcp.tool()
 def raw_graph() -> str:
-    """Return the graph of `raw/` — every .md and .pdf node, plus the
-    wikilink/embed/frontmatter edges between them.
+    """Return the graph of `raw/` — every .md, .pdf, and image node,
+    plus the wikilink/embed/frontmatter edges between them.
 
     Shape:
         {
           "nodes": [
-            {"path": str, "type": "hub|notes|pdf|other_md",
+            {"path": str,
+             "type": "hub|notes|note|other_md|pdf|image|other",
              "frontmatter"?: dict,           # for .md
              "pages"?: int, "extractable"?: bool, "role"?: str  # for .pdf
             }, ...
@@ -144,7 +186,7 @@ def raw_graph() -> str:
     idempotent — no caching needed by the caller.
     """
     g = build_graph(_get_client(), root="raw")
-    return json.dumps(g, indent=2, ensure_ascii=False)
+    return json.dumps(g, indent=2, ensure_ascii=False, default=str)
 
 
 @mcp.tool()
@@ -165,21 +207,52 @@ def read(path: str) -> str:
 
 
 @mcp.tool()
-def write(path: str, content: str) -> str:
-    """Write a markdown file to the vault. Full overwrite — creates or
-    replaces. Path must end in .md.
+def write(path: str, content: str = "", image_path: str | None = None) -> str:
+    """Write a file to the vault. Full overwrite — creates or replaces.
 
-    To append, read first, modify in memory, then write the whole file
-    back. Writing partial content will destroy what's already there.
+    Two modes, dispatched by `path`'s extension:
+
+      .md path                → markdown write. Pass `content` (string).
+      .png/.jpg/.jpeg/.webp   → image write. Pass `image_path` (absolute
+                                local filesystem path). Server reads
+                                bytes from disk and PUTs as image/*.
+
+    To append to a markdown file, read first, modify in memory, then
+    write the whole file back. Partial writes destroy existing content.
 
     Args:
-        path: Vault-relative path, must end in .md
-        content: Full markdown body (frontmatter included if applicable)
+        path: Vault-relative path, must end in .md or an image extension.
+        content: Full markdown body (used only for .md paths).
+        image_path: Absolute local filesystem path to the image file
+                    (used only for image paths). Extension must match
+                    `path`'s extension.
     """
     p = _normalize(path)
-    body_bytes = len(content.encode("utf-8"))
-    _get_client().write_text(p, content)
-    return json.dumps({"path": p, "bytes": body_bytes}, ensure_ascii=False)
+    ext = _ext(p)
+    mime = _MIME[ext]
+
+    if ext in _IMAGE_EXTS:
+        if not image_path:
+            raise ValueError(f"writing to {ext} requires image_path")
+        if content:
+            raise ValueError(f"{ext} writes use image_path=, not content=")
+        src = Path(image_path)
+        if _ext(src.name) != ext:
+            raise ValueError(
+                f"image_path extension ({_ext(src.name)!r}) must match "
+                f"vault path extension ({ext!r})"
+            )
+        try:
+            body = src.read_bytes()
+        except OSError as e:
+            raise ValueError(f"failed to read image_path {image_path!r}: {e}") from None
+    else:
+        if image_path:
+            raise ValueError(".md writes use content=, not image_path=")
+        body = content.encode("utf-8")
+
+    _get_client().write_bytes(p, body, mime)
+    return json.dumps({"path": p, "bytes": len(body)}, ensure_ascii=False)
 
 
 if __name__ == "__main__":
