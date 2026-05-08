@@ -1,0 +1,9 @@
+check @mcps/whatsappand understand how it works
+
+---
+
+right now it's set up on my vps. you can see it if you run ssh signal i thought it would keep alive my beeper session but after i checked it's dead why'
+
+---
+
+yes do this please
