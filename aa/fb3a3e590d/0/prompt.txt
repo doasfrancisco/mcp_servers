@@ -1,0 +1,380 @@
+index https://github.com/obsidianmd/obsidian-api using /nia then add it to @nia.md
+
+---
+
+it's indexed so now create a new mcp @mcps\ 
+
+api key: REDACTED
+
+start by creating a simple get test script. follow @new_mcp_guidelines.md but start with the test script
+
+---
+
+dammn it remove it from @nia.md and index: https://github.com/coddingtonbear/obsidian-local-rest-api
+
+---
+
+should be indexed go
+
+---
+
+i add some pages can you read them? update the @test_obsidian.py
+
+---
+
+ok now i want to test how to write and create a new page. pdate test and create a test for peanos theorems. and link to all pages
+
+---
+
+[Image #1] i'ts not using the formula view? $$ ask nia
+
+---
+
+i want to create a knowledge base in obsidian. about the books i'm reading (math + cs books, related books) so.
+
+so it's about reading an writing pages what's the best way to build this?
+
+---
+
+this is what karparthy does:
+
+LLM Knowledge Bases
+
+Something I'm finding very useful recently: using LLMs to build personal knowledge bases for various topics of research interest. In this way, a large fraction of my recent token throughput is going less into manipulating code, and more into manipulating knowledge (stored as markdown and images). The latest LLMs are quite good at it. So:
+
+Data ingest:
+I index source documents (articles, papers, repos, datasets, images, etc.) into a raw/ directory, then I use an LLM to incrementally "compile" a wiki, which is just a collection of .md files in a directory structure. The wiki includes summaries of all the data in raw/, backlinks, and then it categorizes data into concepts, writes articles for them, and links them all. To convert web articles into .md files I like to use the Obsidian Web Clipper extension, and then I also use a hotkey to download all the related images to local so that my LLM can easily reference them.
+
+IDE:
+I use Obsidian as the IDE "frontend" where I can view the raw data, the the compiled wiki, and the derived visualizations. Important to note that the LLM writes and maintains all of the data of the wiki, I rarely touch it directly. I've played with a few Obsidian plugins to render and view data in other ways (e.g. Marp for slides).
+
+Q&A:
+Where things get interesting is that once your wiki is big enough (e.g. mine on some recent research is ~100 articles and ~400K words), you can ask your LLM agent all kinds of complex questions against the wiki, and it will go off, research the answers, etc. I thought I had to reach for fancy RAG, but the LLM has been pretty good about auto-maintaining index files and brief summaries of all the documents and it reads all the important related data fairly easily at this ~small scale.
+
+Output:
+Instead of getting answers in text/terminal, I like to have it render markdown files for me, or slide shows (Marp format), or matplotlib images, all of which I then view again in Obsidian. You can imagine many other visual output formats depending on the query. Often, I end up "filing" the outputs back into the wiki to enhance it for further queries. So my own explorations and queries always "add up" in the knowledge base.
+
+Linting:
+I've run some LLM "health checks" over the wiki to e.g. find inconsistent data, impute missing data (with web searchers), find interesting connections for new article candidates, etc., to incrementally clean up the wiki and enhance its overall data integrity. The LLMs are quite good at suggesting further questions to ask and look into.
+
+Extra tools:
+I find myself developing additional tools to process the data, e.g. I vibe coded a small and naive search engine over the wiki, which I both use directly (in a web ui), but more often I want to hand it off to an LLM via CLI as a tool for larger queries. 
+
+Further explorations:
+As the repo grows, the natural desire is to also think about synthetic data generation + finetuning to have your LLM "know" the data in its weights instead of just context windows.
+
+TLDR: raw data from a given number of sources is collected, then compiled by an LLM into a .md wiki, then operated on by various CLIs by the LLM to do Q&A and to incrementally enhance the wiki, and all of it viewable in Obsidian. You rarely ever write or edit the wiki manually, it's the domain of the LLM. I think there is room here for an incredible new product instead of a hacky collection of scripts.
+
+---
+
+1. i'll pass books instead. "C:\Francisco\OneDrive - UNIVERSIDAD DE INGENIERIA Y TECNOLOGIA\learn\books\Mathematics\PUCP\Fundamentos de analisis\Analisis Real- Lages.pdf"
+
+2. what do you recommend?
+
+---
+
+you can ignore the notes i have btw. so what do you recommend?
+
+---
+
+mmm ok but as i read i'd like to send to raw. and i'd like to put there my thoughts on what i understand. i'll add the pdf but also my progress reading and also my thoughts.
+
+what does karpathy recommend?
+
+---
+
+ok make this layout on obsidian. use @test_obsidian.py and ask /nia if possible
+
+---
+
+ok uploda the pdf then and also put the pytoml in obsidian so uv run can be run properly
+
+---
+
+did you add the text.md? also metadata?
+
+---
+
+yes add ofc
+
+---
+
+[Image #2] i've noticed the source notes and text are not connected to a book or between themselves
+
+---
+
+[Image #4] i'm not sure if this is show it should look i thought the connections should be text + notes + source , etc with one edge connected to the tetx or pdf or something.
+
+what you do you think? also why thre are some many readmes in wiki.
+
+---
+
+[Image #5] it toggled the file thing. focus first on the archi wor raw please
+
+---
+
+1. do the yaml thingy
+2. nah text should be the whole thing
+3. can't analysis real lages (root) be the source pdf or the text? maybe change the name of the text to title?
+check new image: [Image #6]
+
+---
+
+what do i need elon lages lima and real analysis for? i dont need those two
+
+---
+
+cool now add another book. this one: "C:\Francisco\OneDrive - UNIVERSIDAD DE INGENIERIA Y TECNOLOGIA\learn\books\Mathematics\Discrete Mathematics\Grimaldi - Discrete and Combinatorial Mathematics ,5e (Instructor's Solution Manual)(2004).pdf" "C:\Francisco\OneDrive - UNIVERSIDAD DE INGENIERIA Y TECNOLOGIA\learn\books\Mathematics\Discrete Mathematics\Grimaldi - Discrete and Combinatorial Mathematics 5e.pdf"
+
+these two actually i think have no text but only images and one has the instructor solution bro.
+
+add them in raw/ to see how they would look
+
+---
+
+[Image #7] there's something weird going on with the second book
+
+---
+
+okok i want this then if text if a book is marked as pdf only then get the pdf file but no text
+
+---
+
+mmmm i think to avoid issues simply remove the text part of the book. no text.md just pdf.
+ultrathink
+
+---
+
+ok i like this so tell me what tools and rules my mcp should work as?
+
+based on how i've modeled my current obsidian
+
+---
+
+i think i'll start with 2 tools called:
+
+get_raw_base()
+read()
+write()
+
+raw base gets me the index of the thing as a maybe a graph like how it shows in obsidian so you can see how one connects with the other.
+
+read only works for .md 
+and write for .md only.
+
+simple and clear for now.
+
+ultrathink
+
+---
+
+i want it scoped to raw/m maybe call it raw_graph()
+
+now build this.
+
+ultrathink
+
+---
+
+ing: authlib.jose module is deprecated, please use joserfc instead.
+
+why are you using jose why is there a jwt?
+
+---
+
+ask @..\..\nia.md what's the lates version for fastmcp and use that one bro
+
+/nia
+
+---
+
+ok now tell me which files are no longer needed at @mcps/obsidian\
+
+---
+
+and update fastmcp version at @new_mcp_guidelines.md
+
+---
+
+delete "  ┌────────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+  │        File        │                                                          Why it can go                                                          │
+  ├────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ setup_layout.py    │ Scaffolded the initial folder layout + the 5 READMEs. The vault is now structured by extract_book.py, and the READMEs were      │
+  │                    │ already deleted by cleanup_readmes.py. Pure legacy.                                                                             │
+  ├────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ cleanup_readmes.py │ One-shot to delete those READMEs and rewrite wiki/index.md. Already executed; the files it targets no longer exist. Re-running  │
+  │                    │ would be a no-op.                                                                                                               │
+  ├────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ ingest_pdf.py      │ Single-PDF uploader for one hardcoded book. Fully superseded by extract_book.py, which handles multi-PDF books, frontmatter,    │
+  │                    │ sample-probe, and idempotent re-runs.                                                                                           │
+  ├────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ test_obsidian.py   │ Original Peano-axioms prototype that established the bearer-auth pattern. The pattern now lives in obsidian_client.py and       │
+  │                    │ test_server.py exercises the real server. Pure legacy.  " and test server and extract book.py
+
+---
+
+" add this: "las funciones inyectivas significan que cada elemento del
+  codominio tiene a lo mucho 1 preimagen.
+
+  y solo con inyectividad podrían existir otros n sin predecesor además del
+   1.
+
+  pero en la propiedad 2 indica que el 1 es el único que no tiene
+  predecesor.
+
+  los axiomas no asumen que ya sabes que es lo que estas definiendo. (En
+  este caso N)
+
+  cuando un teorema dice "Si X cumple P, entonces Q", en matemáticas eso se
+   lee como: "Todo X que cumpla P, entonces Q."
+
+  por lo tanto "si X..." es universal, no condicional sobre existencia
+
+
+  finalmente, el completo entendimiento de una verdad me permite me permite
+   analizar correctamente futuras proposiciones.
+
+  para proposiciones que incluyan funciones inyectivas tomaré en cuenta que
+   propiedades describe. por ejemplo, un elemento del codominio puede no
+  tener preimagen. o, que una función puede ser inyectiva y generar ciclos.
+   s(a) = b, s(b) = a."
+
+● Loading the Obsidian tool schemas, then read-modify-write notes.md to
+  preserve the frontmatter and replace the placeholder section.
+
+  Called obsidian (ctrl+o to expand)
+
+● Connection rechazada en 127.0.0.1:27124 — Obsidian (o el plugin Local REST
+   API) no está corriendo. Tu cliente del MCP arrancó bien antes (el smoke
+  test conectó y el commit pushed) pero ahora el endpoint no responde.
+
+  Abre Obsidian y verifica que el plugin Local REST API esté activado
+  (Settings → Community plugins → Local REST API → toggle on). Cuando esté
+  listo, dime y reintento — tengo el entry listo para escribir:
+
+  ## 2026-05-04 — ch.1 §1
+
+  las funciones inyectivas significan que cada elemento del codominio tiene
+  a lo mucho 1 preimagen.
+
+  y solo con inyectividad podrían existir otros n sin predecesor además del
+  1.
+
+  pero en la propiedad 2 indica que el 1 es el único que no tiene
+  predecesor.
+
+  los axiomas no asumen que ya sabes que es lo que estas definiendo. (En
+  este caso N)
+
+  cuando un teorema dice "Si X cumple P, entonces Q", en matemáticas eso se
+  lee como: "Todo X que cumpla P, entonces Q."
+
+  por lo tanto "si X..." es universal, no condicional sobre existencia
+
+  finalmente, el completo entendimiento de una verdad me permite me permite
+  analizar correctamente futuras proposiciones.
+
+  para proposiciones que incluyan funciones inyectivas tomaré en cuenta que
+  propiedades describe. por ejemplo, un elemento del codominio puede no
+  tener preimagen. o, que una función puede ser inyectiva y generar ciclos.
+  s(a) = b, s(b) = a.
+
+  Notarás que dejé verbatim tu "me permite me permite" — typo doble. Si
+  quieres que lo limpie a "me permite", dímelo en el mismo go-ahead y lo
+  escribo limpio. Por defecto preservo lo que escribiste tal cual (la regla
+  del servidor es escribir la prosa del usuario sin parafrasear).
+
+  Plan al recibir tu OK: reemplazo el bloque actual ## 2026-05-04 — initial
+  ingest + (write your first thoughts here) por el entry de arriba. La
+  frontmatter (book: [[Analisis Real - Lages]], type: reading-notes) y el
+  callout de navegación se preservan intactos.
+
+✻ Sautéed for 1m 34s
+
+❯ /mcp
+  ⎿  MCP dialog dismissed
+
+❯ you can add it now
+
+  Called obsidian 2 times (ctrl+o to expand)
+
+● Escrito. raw/Analisis Real - Lages/notes.md ahora pesa 1436 bytes.
+
+  Lo que cambió:
+  - Frontmatter (book, type) — preservada
+  - Callout de navegación — preservado
+  - Heading ## 2026-05-04 — initial ingest + placeholder (write your first
+  thoughts here) → reemplazados por ## 2026-05-04 — ch.1 §1 + tu entry
+  verbatim (incluyendo "me permite me permite" tal cual lo escribiste)
+
+  Refresca Obsidian — debería aparecer en el grafo como un edge nuevo desde
+  notes.md hacia el hub vía la frontmatter, mismo nodo de antes pero con
+  contenido real.
+
+✻ Crunched for 34s
+
+ This session is being continued from a previous conversation that ran out
+of context. The summary be (Branch) ──
+❯ 
+────────────────────────────────────────────────────────────────────────────
+─────────────────────────────────────
+  github-repositories/mcp_servers │ 16%
+  ⏵⏵ accept edits on (shift+tab to cycle)"
+
+i want to be able to upload screenshots.
+
+also i think the way notes should work is. notes is parent node with on edge (in it) pointing to the book. then my notes connect to notes (each has in it an edge to notes by default)
+
+so then if i want to add a note you:
+
+check the graph
+read relevant notes to my new note
+
+decide to append to an existing note or write one.
+
+what you think?
+
+---
+
+nah the path to attach should be in write
+
+it should automatic. but i worry notes.md gets full of links.... is it possible for it to have on linke to the book. and the notes a linke to notes? or are all edge bidirectional?
+
+---
+
+isn't there a library i can use to do this? ask fastmcp @nia.md /nia
+
+---
+
+server should read the diss. content should be inferred from the file.
+
+what will you do?
+
+---
+
+why does each write to markdonw costs a tem file?? can't source path be optional and only send if an image is getting send?
+
+---
+
+i don0t neeed content....  content: str | None = None, call it image_path and if image path gets send then checn the mime type???
+
+---
+
+what is content???
+
+---
+
+oh ok then in that case proceed.
+
+---
+
+ok do this "  1. Migración de tu notes.md actual — todavía tiene la entrada ## 2026-05-04 — ch.1 §1 que escribimos. Si quieres seguir el modelo nuevo, esa entrada
+  debería volverse raw/Analisis Real - Lages/notes/inyectividad-y-predecesores.md (o el slug que prefieras), y notes.md quedar reducido a --- book: [[...]]"
+
+---
+
+check the graph again it should show the new note connects only to notes right?
+
+---
+
+inyectividad shouldn't poin to books only to notes whcich point to bugs i think
