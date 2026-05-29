@@ -1,0 +1,3 @@
+check @skills/git-push\ 
+
+is it possible to make this skill a subagent?

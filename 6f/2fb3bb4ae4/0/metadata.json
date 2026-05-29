@@ -1,0 +1,60 @@
+{
+  "cli_version": "0.5.6",
+  "checkpoint_id": "6f2fb3bb4ae4",
+  "session_id": "0ba5028a-4e1a-4b6b-87fe-d97137befa2f",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-29T16:52:59.060766Z",
+  "branch": "master",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "mcps/obsidian/obsidian_client.py",
+    "mcps/obsidian/server.py",
+    "mcps/whatsapp/VPS_SETUP.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "1c6579391970",
+  "token_usage": {
+    "input_tokens": 7,
+    "cache_creation_tokens": 18470,
+    "cache_read_tokens": 59486,
+    "output_tokens": 1442,
+    "api_call_count": 2
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-29T16:52:59.0318718Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 237,
+    "human_modified": 35,
+    "human_removed": 0,
+    "total_committed": 237,
+    "total_lines_changed": 272,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 490,
+      "user_lines_removed": 35,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "mcps/obsidian/README.md": 168,
+        "mcps/obsidian/obsidian_client.py": 37,
+        "mcps/obsidian/server.py": 66,
+        "mcps/whatsapp/VPS_SETUP.md": 78,
+        "skills/compile-wiki/SKILL.md": 141
+      },
+      "user_removed_per_file": {
+        "mcps/obsidian/obsidian_client.py": 12,
+        "mcps/obsidian/server.py": 5,
+        "mcps/whatsapp/VPS_SETUP.md": 18
+      }
+    }
+  ]
+}
