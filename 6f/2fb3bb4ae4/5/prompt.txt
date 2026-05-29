@@ -1,0 +1,13 @@
+i've been hacked and people have accesed to my whatsapp programmatically for months. and i worry what type of credentials they have access to. so i want you to check all my info since january 1st.
+
+then i want you to access info that's personal and i shouldn't be sharing.
+
+ultrathink and make sure you run at leats 10 explore agents to analyze all the info.
+
+---
+
+what tools did you run
+
+---
+
+i want you tu run whatsapp get messages bro
