@@ -7,14 +7,15 @@ Run Beeper Desktop headless on a Linux VPS so the WhatsApp MCP HTTP server is al
 ```
 [Claude Code] --HTTP--> [VPS:23380 MCP server] --localhost--> [VPS:23373 Beeper Desktop API]
                                                                        |
-                                                              [Xvfb virtual display :99]
+                                                       [Xvfb :99 (1920×1080) + openbox WM]
 ```
 
-Four systemd services keep everything alive:
-1. **xvfb** — virtual framebuffer so Beeper thinks there's a screen
-2. **beeper** — Beeper Desktop running headless under Xvfb
-3. **whatsapp-mcp** — FastMCP HTTP server exposing the MCP tools
-4. **x11vnc** — VNC server mirroring the virtual display for remote access
+Five systemd services keep everything alive:
+1. **xvfb** — virtual framebuffer (1920×1080) so Beeper thinks there's a screen
+2. **wm** — a minimal window manager (openbox) on the virtual display, so windows are movable/resizable/maximizable over VNC (without it, Beeper's window is unmanaged and you can't drag or resize it)
+3. **beeper** — Beeper Desktop running headless under Xvfb
+4. **whatsapp-mcp** — FastMCP HTTP server exposing the MCP tools
+5. **x11vnc** — VNC server mirroring the virtual display for remote access
 
 ## Prerequisites
 
@@ -27,13 +28,15 @@ Four systemd services keep everything alive:
 
 ```bash
 sudo apt update
-sudo apt install -y xvfb x11vnc libgtk-3-0 libnotify4 libnss3 libxss1 \
+sudo apt install -y xvfb x11vnc openbox libgtk-3-0 libnotify4 libnss3 libxss1 \
   libasound2t64 libgbm1 git curl
 ```
 
 ## Step 2: Install Beeper Desktop
 
 Download the versioned AppImage, then symlink it to a stable filename (`Beeper.AppImage`). The systemd unit and all docs reference the symlink — when Beeper updates, you only retarget the symlink, no unit edit, no `daemon-reload`. Skipping the symlink leaves the unit hardcoded to a version that will eventually disappear and put `beeper.service` into an infinite `status=203/EXEC` restart loop.
+
+> **Auto-update safety net.** Beeper updates itself in the background by dropping a new `Beeper-<ver>-x86_64.AppImage` into `~/Downloads` and **deleting the old one** — without retargeting your symlink, so it silently goes dangling. The currently-running process keeps going (its files are mounted under `/tmp`), so nothing breaks until the next restart/reboot → `203/EXEC`. To make this impossible, the `beeper.service` in Step 7 has an `ExecStartPre` that repoints `Beeper.AppImage` at the newest versioned AppImage in `~/Downloads` on **every** start. You still create the symlink manually here so the very first launch (Step 3, before the service exists) works.
 
 ```bash
 cd ~/Downloads
@@ -108,7 +111,10 @@ Copy `tags.json` from your local machine if you have existing tags (optional).
 ```bash
 # Start Xvfb
 export DISPLAY=:99
-Xvfb :99 -screen 0 1280x720x24 &
+Xvfb :99 -screen 0 1920x1080x24 &
+
+# Start a window manager so windows are movable/resizable over VNC
+openbox &
 
 # Start Beeper
 ./Downloads/Beeper.AppImage --no-sandbox &
@@ -143,7 +149,31 @@ sudo tee /etc/systemd/system/xvfb.service <<'EOF'
 Description=Virtual framebuffer X server
 
 [Service]
-ExecStart=/usr/bin/Xvfb :99 -screen 0 1280x720x24
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1920x1080x24
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+### Window manager service (openbox)
+
+Without a window manager, Beeper's window is unmanaged: it opens at a fixed position (often partly off-screen), has no title bar, and **can't be moved, resized, or maximized** over VNC. openbox is a minimal standalone WM with no desktop-environment or D-Bus/Xfconf dependencies (xfwm4, by contrast, crash-loops headless because it needs Xfce's config daemon).
+
+```bash
+sudo tee /etc/systemd/system/wm.service <<'EOF'
+[Unit]
+Description=Window manager (openbox) for display :99
+After=xvfb.service
+Requires=xvfb.service
+Before=beeper.service
+
+[Service]
+User=<your-username>
+Environment=DISPLAY=:99
+ExecStart=/usr/bin/openbox
 Restart=always
 RestartSec=3
 
@@ -158,12 +188,18 @@ EOF
 sudo tee /etc/systemd/system/beeper.service <<'EOF'
 [Unit]
 Description=Beeper Desktop (headless)
-After=xvfb.service
+After=xvfb.service wm.service
 Requires=xvfb.service
+Wants=wm.service
 
 [Service]
 User=<your-username>
 Environment=DISPLAY=:99
+# Self-heal the stable symlink before launch: Beeper auto-updates by dropping a
+# new Beeper-<ver>-x86_64.AppImage in ~/Downloads and deleting the old one, which
+# leaves Beeper.AppImage dangling -> 203/EXEC on next start. Repoint it at the
+# newest versioned AppImage every start so an auto-update can never break boot.
+ExecStartPre=/bin/bash -c 'latest=$$(ls -1 /home/<your-username>/Downloads/Beeper-*-x86_64.AppImage 2>/dev/null | sort -V | tail -1); [ -n "$$latest" ] && ln -sf "$$latest" /home/<your-username>/Downloads/Beeper.AppImage; true'
 ExecStart=/home/<your-username>/Downloads/Beeper.AppImage --no-sandbox
 Restart=always
 RestartSec=5
@@ -172,6 +208,8 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 ```
+
+> The `$$` in `ExecStartPre` is intentional: systemd unescapes `$$` to a literal `$` before handing the line to bash, so bash receives `$(...)` and `$latest`. Writing a single `$` would make systemd try to expand `$latest` as an environment variable.
 
 ### WhatsApp MCP service
 
@@ -217,14 +255,14 @@ EOF
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable xvfb beeper whatsapp-mcp x11vnc
-sudo systemctl start xvfb beeper whatsapp-mcp x11vnc
+sudo systemctl enable xvfb wm beeper whatsapp-mcp x11vnc
+sudo systemctl start xvfb wm beeper whatsapp-mcp x11vnc
 ```
 
 ### Verify
 
 ```bash
-sudo systemctl status xvfb beeper whatsapp-mcp x11vnc
+sudo systemctl status xvfb wm beeper whatsapp-mcp x11vnc
 curl http://localhost:23373/v1/info    # Beeper API
 curl http://localhost:23380/mcp        # MCP server
 ```
@@ -280,6 +318,15 @@ Use this to:
 
 [TigerVNC Viewer](https://sourceforge.net/projects/tigervnc/files/stable/) — download `vncviewer64-<version>.exe` (standalone, no install). Don't download the `-winvnc-` file (that's a server).
 
+### Moving and resizing windows
+
+The `wm` (openbox) service manages windows on `:99`. In the VNC viewer:
+
+- **Drag the title bar** to move a window; **double-click the title bar** to maximize.
+- Anywhere in a window: **`Alt` + left-drag = move**, **`Alt` + right-drag = resize** (handy when a window opens larger than the screen or its title bar is off-screen).
+
+If you reconnect after changing the Xvfb resolution, close and reopen the viewer so it picks up the new framebuffer size.
+
 ## Message backfill
 
 A freshly installed Beeper instance only has recent messages (~last few hours). Older messages are fetched from WhatsApp's servers when you scroll up in a chat.
@@ -307,10 +354,21 @@ Beeper needs a display. If running from SSH without Xvfb:
 
 ```bash
 export DISPLAY=:99
-Xvfb :99 -screen 0 1280x720x24 &
+Xvfb :99 -screen 0 1920x1080x24 &
 ```
 
 Or use the systemd xvfb service.
+
+### VNC shows a clipped window you can't move/resize
+
+Beeper's window is unmanaged because no window manager is running on `:99`. Confirm with `DISPLAY=:99 xprop -root _NET_SUPPORTING_WM_CHECK` — if it says **`not found`**, there's no live WM. Make sure the `wm` (openbox) service is running:
+
+```bash
+sudo systemctl status wm
+DISPLAY=:99 xprop -root _NET_SUPPORTING_WM_CHECK   # should print a window id once a WM is up
+```
+
+If you see `Xfconf could not be initialized` in `journalctl -u wm`, the unit is pointing at xfwm4 — switch it to openbox (`ExecStart=/usr/bin/openbox`), which has no Xfconf/D-Bus dependency. Also confirm the framebuffer is large enough for Beeper's window (`DISPLAY=:99 xdpyinfo | grep dimensions` → should be `1920x1080`).
 
 ### `Archive format is not recognized` (xarchiver popup)
 
@@ -318,7 +376,9 @@ The `.AppImage` file was double-clicked in a file manager. It's not an archive �
 
 ### `beeper.service` in restart loop with `status=203/EXEC`
 
-Beeper got updated and the old AppImage filename no longer exists, but the systemd unit still points at it. Check the symlink target:
+Beeper got updated and the old AppImage filename no longer exists, but the symlink still points at it. **With the Step 7 `beeper.service`, this self-heals** — the `ExecStartPre` retargets the symlink to the newest AppImage on every start, so a simple `sudo systemctl reset-failed beeper && sudo systemctl restart beeper` fixes it (no manual `ln` needed). The steps below are for older units without that `ExecStartPre`, or if Beeper downloaded its update somewhere other than `~/Downloads`.
+
+Check the symlink target:
 
 ```bash
 ls -la ~/Downloads/Beeper.AppImage
@@ -373,17 +433,17 @@ This is **normal**. The MCP server is alive — curl just isn't a valid MCP clie
 
 ```bash
 # Check status
-sudo systemctl status xvfb beeper whatsapp-mcp x11vnc
+sudo systemctl status xvfb wm beeper whatsapp-mcp x11vnc
 
 # View logs
 journalctl -u whatsapp-mcp --no-pager -n 50
 journalctl -u beeper --no-pager -n 50
 
 # Restart everything
-sudo systemctl restart xvfb beeper whatsapp-mcp x11vnc
+sudo systemctl restart xvfb wm beeper whatsapp-mcp x11vnc
 
 # Stop everything
-sudo systemctl stop whatsapp-mcp x11vnc beeper xvfb
+sudo systemctl stop whatsapp-mcp x11vnc beeper wm xvfb
 
 # Update the MCP code
 cd ~/github-repositories/better-mcp && git pull && cd mcps/whatsapp && uv sync

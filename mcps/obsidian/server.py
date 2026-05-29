@@ -1,8 +1,11 @@
 """Obsidian MCP — books knowledge base.
 
-Three tools:
+Four tools:
     raw_graph()                              graph of raw/ — md+pdf+image
                                              nodes + wikilink/embed/fm edges
+    wiki_graph()                             graph of wiki/ — the compiled
+                                             layer; links resolve into raw/
+                                             so sources[] provenance shows
     read(path)                               read a .md file
     write(path, content="", image_path=...)  write a .md (content=) or
                                              image (image_path=, server
@@ -45,8 +48,10 @@ mcp = FastMCP(
   wiki/                         (LLM-compiled output — only on explicit
                                   "compile" / "rebuild concepts" requests)
 
-THREE TOOLS:
-  raw_graph()                              full graph of raw/
+FOUR TOOLS:
+  raw_graph()                              full graph of raw/ (ingest layer)
+  wiki_graph()                             full graph of wiki/ (compiled
+                                           layer); links resolve into raw/
   read(path)                               read a .md file
   write(path, content="",                  write a .md (use content=) or
         image_path=None)                   an image (use image_path=)
@@ -56,7 +61,9 @@ IMPORTANT: discover schemas with ToolSearch before first call.
 ALWAYS START WITH raw_graph. Don't read blindly. The graph tells you
 what exists, node types (hub|notes|note|other_md|pdf|image), the
 wikilinks, and which links are ghosts (target_exists: false). All
-read/write decisions follow from it.
+read/write decisions follow from it. For wiki work (compile, lint, Q&A
+against the wiki) also pull wiki_graph — nodes index|concept|book-summary,
+with links resolved into raw/ so sources[] provenance shows as real edges.
 
 NOTES MODEL — ATOMIC, ZETTELKASTEN-STYLE:
   - notes.md is an INDEX node. Frontmatter `book: [[X]]`, body minimal
@@ -73,6 +80,39 @@ NOTES MODEL — ATOMIC, ZETTELKASTEN-STYLE:
     titles touch the same concept, (3) decide:
         a) belongs in an existing note → read it, append, write back
         b) distinct concept           → create new <slug>.md
+
+WIKI LAYER — COMPILED, LLM-OWNED:
+  wiki/index.md                 Map of Content; entry point for Q&A
+  wiki/concepts/<slug>.md       one article per concept, synthesized
+                                across atomic notes (and books)
+  wiki/books/<slug>.md          per-book compiled summary
+  Concept frontmatter carries PROVENANCE + cross-links:
+      type: concept
+      sources: ["[[atomic-note-slug]]", ...]   # raw notes compiled from
+      related: ["[[other-concept]]", ...]
+      updated: YYYY-MM-DD
+  wiki/ is DERIVED, regenerable data; raw/ is the source of truth. Every
+  wiki claim must trace to a raw note or source via sources[] — never
+  author wiki "facts" with no provenance. If the wiki rots, recompile.
+  In sources[], cite raw notes by their FULL atomic-note slug (e.g.
+  [[inyectividad-y-predecesores]], not [[inyectividad]]). A bare basename
+  shared with a concept resolves to the nearest file (the concept itself),
+  so the provenance edge would point sideways instead of into raw/.
+
+COMPILE LOOP (only on explicit "compile" / "rebuild wiki" requests):
+  1. raw_graph() + wiki_graph().
+  2. Uncompiled set = atomic notes not cited in any wiki sources[].
+  3. Per note: extend an existing concept (read → rewrite the whole file)
+     or start a new wiki/concepts/<slug>.md. One concept = one article;
+     notes are atomic (one thought), concepts integrate many.
+  4. Update wiki/index.md and related: cross-links.
+  5. LINT via wiki_graph(): fix target_exists:false ghosts, link orphans.
+  Incremental — don't recompile covered notes. sources[] IS the coverage
+  ledger; there's no separate "compiled" flag.
+
+Q&A AGAINST THE WIKI: read wiki/index.md, navigate concept articles,
+answer from them. Offer to file the answer back as a new/updated wiki
+article so explorations accumulate in the KB.
 
 PDFS ARE NOT READABLE. They appear in the graph as nodes (with page
 count + extractable from the sibling hub's sources[]) so you know they
@@ -105,7 +145,7 @@ so explicitly and offer to create it.
 
 NO NEW TOP-LEVEL FOLDERS. Only raw/, wiki/, attachments/ by design.
 New books go in raw/<book>/. New atomic notes go in raw/<book>/notes/.
-Don't invent siblings.
+Wiki content goes in wiki/concepts/ or wiki/books/. Don't invent siblings.
 
 CONFIRM BEFORE WRITE. Tell the user the path, the mode (.md content vs
 image), and a one-line summary. Stop. Wait for confirmation. Exception:
@@ -186,6 +226,27 @@ def raw_graph() -> str:
     idempotent — no caching needed by the caller.
     """
     g = build_graph(_get_client(), root="raw")
+    return json.dumps(g, indent=2, ensure_ascii=False, default=str)
+
+
+@mcp.tool()
+def wiki_graph() -> str:
+    """Return the graph of `wiki/` — the LLM-compiled layer.
+
+    Same shape as raw_graph (nodes + edges). Nodes are wiki files only,
+    typed index|concept|book-summary|other_md|image. Links are resolved
+    against wiki/ + raw/ + attachments/, so a concept article's
+    `sources: [[some-raw-note]]` resolves (target_exists: true) and the
+    edge points at the raw note's path — the provenance edge from the
+    compiled layer back into raw. Real ghosts (typos, deleted targets)
+    still show target_exists: false.
+
+    Use this to LINT the wiki: find orphan concepts and ghost links, and —
+    by comparing against raw_graph — which atomic notes aren't cited by
+    any wiki article yet (the uncompiled set). Returns empty nodes until
+    the wiki has been compiled.
+    """
+    g = build_graph(_get_client(), root="wiki", link_roots=["raw", "attachments"])
     return json.dumps(g, indent=2, ensure_ascii=False, default=str)
 
 

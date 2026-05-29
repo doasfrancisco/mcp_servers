@@ -1,0 +1,16 @@
+[project]
+name = "newsetup"
+version = "0.2.0"
+description = "Scaffold projects from templates (Next.js frontend, Django backend, ...)"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+newsetup = "new_setup.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["new_setup"]

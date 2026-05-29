@@ -266,6 +266,14 @@ def _classify(path: str) -> str:
     # raw/<book>/notes/<slug>.md → note (atomic note)
     if len(parts) == 4 and parts[0] == "raw" and parts[2] == "notes":
         return "note"
+    # wiki/ compiled layer
+    if parts[0] == "wiki":
+        if len(parts) == 2 and parts[1] == "index.md":
+            return "index"
+        if len(parts) == 3 and parts[1] == "concepts":
+            return "concept"
+        if len(parts) == 3 and parts[1] == "books":
+            return "book-summary"
     return "other_md"
 
 
@@ -292,16 +300,32 @@ def _pdf_meta_for(path: str, hub_index: dict[str, dict]) -> dict:
     return {}
 
 
-def build_graph(client: ObsidianClient, root: str = "raw") -> dict:
+def build_graph(
+    client: ObsidianClient,
+    root: str = "raw",
+    link_roots: list[str] | None = None,
+) -> dict:
     """Walk `root/` and return {nodes, edges}.
 
-    Nodes: every .md and .pdf under root, with type + frontmatter (md) or
-    pages/extractable (pdf when hub records it).
-    Edges: wikilinks (body + frontmatter) + embeds, resolved by basename
-    or path. `target_exists: false` flags ghost links.
+    Nodes come from `root` ONLY: every .md and .pdf under it, with type +
+    frontmatter (md) or pages/extractable (pdf when hub records it).
+
+    `link_roots` names extra folders whose files join the resolution
+    universe — so a cross-layer link (e.g. a wiki concept citing a raw note
+    in `sources[]`) resolves instead of showing as a ghost. Edges may
+    therefore point at paths that are not in `nodes` (that's the provenance
+    edge from wiki/ into raw/). Real ghosts still flag target_exists: false.
+
+    Edges: wikilinks (body + frontmatter) + embeds, resolved by basename or
+    path against root + link_roots.
     """
-    files = client.walk_files(root)
-    md_files = [f for f in files if f.lower().endswith(".md")]
+    node_files = client.walk_files(root)
+    resolve_files = list(node_files)
+    for extra in link_roots or []:
+        if extra != root:
+            resolve_files += client.walk_files(extra)
+
+    md_files = [f for f in node_files if f.lower().endswith(".md")]
 
     # Pass 1: read all .md, parse frontmatter + body links.
     md_data: dict[str, dict] = {}
@@ -319,9 +343,9 @@ def build_graph(client: ObsidianClient, root: str = "raw") -> dict:
             folder = "/".join(path.split("/")[:-1])
             hub_index[folder] = fm
 
-    # Pass 2: build nodes.
+    # Pass 2: build nodes (from node_files only).
     nodes = []
-    for path in sorted(files):
+    for path in sorted(node_files):
         kind = _classify(path)
         node: dict[str, Any] = {"path": path, "type": kind}
         if kind == "pdf":
@@ -332,11 +356,12 @@ def build_graph(client: ObsidianClient, root: str = "raw") -> dict:
                 node["frontmatter"] = fm
         nodes.append(node)
 
-    # Pass 3: resolve edges (folder-aware via source_path).
+    # Pass 3: resolve edges (folder-aware via source_path) against the
+    # possibly-wider resolve_files set.
     edges = []
     for path, data in md_data.items():
         for target, kind in data["body_links"]:
-            resolved = resolve_link(target, files, source_path=path)
+            resolved = resolve_link(target, resolve_files, source_path=path)
             edges.append({
                 "from": path,
                 "to": resolved or target,
@@ -344,7 +369,7 @@ def build_graph(client: ObsidianClient, root: str = "raw") -> dict:
                 "target_exists": resolved is not None,
             })
         for target in data["fm_links"]:
-            resolved = resolve_link(target, files, source_path=path)
+            resolved = resolve_link(target, resolve_files, source_path=path)
             edges.append({
                 "from": path,
                 "to": resolved or target,

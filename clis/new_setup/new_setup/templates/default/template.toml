@@ -1,0 +1,9 @@
+description = "Next.js frontend + Django backend"
+
+[frontend]
+cwd = "."
+commands = ["npx create-next-app@latest frontend --yes"]
+
+[backend]
+cwd = "backend"
+commands = ["django-admin startproject config ."]
