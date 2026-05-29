@@ -1,0 +1,134 @@
+{
+  "cli_version": "0.5.6",
+  "checkpoint_id": "6f2fb3bb4ae4",
+  "session_id": "47506475-0979-4df0-b275-892af74245f0",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-29T16:52:59.5506061Z",
+  "branch": "master",
+  "checkpoints_count": 12,
+  "files_touched": [
+    "mcps/obsidian/obsidian_client.py",
+    "mcps/obsidian/server.py",
+    "mcps/whatsapp/VPS_SETUP.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-7[1m]",
+  "turn_id": "41996ae7d96f",
+  "token_usage": {
+    "input_tokens": 18985,
+    "cache_creation_tokens": 170702,
+    "cache_read_tokens": 6614235,
+    "output_tokens": 79834,
+    "api_call_count": 62
+  },
+  "session_metrics": {
+    "turn_count": 12
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-29T16:52:59.5125021Z",
+    "agent_lines": 61,
+    "agent_removed": 18,
+    "human_added": 396,
+    "human_modified": 17,
+    "human_removed": 0,
+    "total_committed": 474,
+    "total_lines_changed": 492,
+    "agent_percentage": 16.056910569105693,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 271,
+      "user_lines_removed": 17,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "mcps/obsidian/README.md": 168,
+        "mcps/obsidian/obsidian_client.py": 37,
+        "mcps/obsidian/server.py": 66
+      },
+      "user_removed_per_file": {
+        "mcps/obsidian/obsidian_client.py": 12,
+        "mcps/obsidian/server.py": 5
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 271,
+      "agent_lines_removed": 17
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 271,
+      "agent_lines_removed": 17
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 271,
+      "agent_lines_removed": 17
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 271,
+      "agent_lines_removed": 17
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 271,
+      "agent_lines_removed": 17
+    },
+    {
+      "checkpoint_number": 7,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 271,
+      "agent_lines_removed": 17
+    },
+    {
+      "checkpoint_number": 8,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 271,
+      "agent_lines_removed": 17
+    },
+    {
+      "checkpoint_number": 9,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 349,
+      "agent_lines_removed": 35
+    },
+    {
+      "checkpoint_number": 10,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 349,
+      "agent_lines_removed": 35
+    },
+    {
+      "checkpoint_number": 11,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 349,
+      "agent_lines_removed": 35
+    },
+    {
+      "checkpoint_number": 12,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
