@@ -45,6 +45,22 @@ def iter_files(root: Path):
             yield p
 
 
+def prompt_conflict(dest: Path) -> str:
+    if not sys.stdin.isatty():
+        fail(f"{dest} already exists (non-interactive shell; use --force to overwrite).")
+    while True:
+        ans = input(
+            f"[newsetup] {dest} already exists. [o]verride / [m]erge / [s]kip? "
+        ).strip().lower()
+        if ans in ("o", "override"):
+            return "override"
+        if ans in ("m", "merge"):
+            return "merge"
+        if ans in ("s", "skip"):
+            return "skip"
+        print("  answer o, m, or s.")
+
+
 def cmd_list() -> None:
     root = templates_dir()
     found = False
@@ -91,18 +107,23 @@ def cmd_new(args: argparse.Namespace) -> None:
         d = target / m
         if d.exists() and any(d.iterdir()):
             fail(f"{d} already exists and is not empty. refusing to clobber.")
+
+    config_decisions: dict[Path, str] = {}
     if apply_config:
         for f in iter_files(config_dir):
             dest = target / f.relative_to(config_dir)
-            if dest.exists() and not args.force:
-                fail(f"{dest} already exists. use --force to overwrite.")
+            if dest.exists():
+                config_decisions[dest] = "override" if args.force else prompt_conflict(dest)
 
     summary = "bare (config only)" if args.bare else (
         f"modules [{', '.join(selected)}] + config" if selected else "config only"
     )
     print(f"[newsetup] template '{args.template}' -> {target}  ({summary})")
 
-    run("git init", target)
+    if (target / ".git").exists():
+        print(f"[newsetup] git repo already exists in {target}, skipping git init")
+    else:
+        run("git init", target)
 
     for m in selected:
         section = data.get(m) if isinstance(data.get(m), dict) else {}
@@ -120,6 +141,16 @@ def cmd_new(args: argparse.Namespace) -> None:
     if apply_config:
         for f in iter_files(config_dir):
             dest = target / f.relative_to(config_dir)
+            decision = config_decisions.get(dest)
+            if decision == "skip":
+                print(f"[newsetup] skipped {dest} (kept existing)")
+                continue
+            if decision == "merge":
+                existing = dest.read_text(encoding="utf-8").rstrip("\n")
+                addition = f.read_text(encoding="utf-8")
+                dest.write_text(f"{existing}\n\n{addition}", encoding="utf-8")
+                print(f"[newsetup] merged into {dest}")
+                continue
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(f, dest)
             print(f"[newsetup] wrote {dest}")
@@ -162,7 +193,8 @@ def main() -> None:
         "-f",
         "--force",
         action="store_true",
-        help="overwrite existing root config files",
+        help="overwrite existing root config files without prompting "
+        "(default: ask override/merge/skip per file)",
     )
 
     args = parser.parse_args()

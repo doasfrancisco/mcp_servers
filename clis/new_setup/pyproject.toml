@@ -1,6 +1,6 @@
 [project]
 name = "newsetup"
-version = "0.2.0"
+version = "0.3.1"
 description = "Scaffold projects from templates (Next.js frontend, Django backend, ...)"
 requires-python = ">=3.11"
 dependencies = []

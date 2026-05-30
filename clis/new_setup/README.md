@@ -11,7 +11,7 @@ newsetup new --path . --template default                         # all modules +
 newsetup new --path myapp --template default --only frontend     # one module (+ config) into ./myapp
 newsetup new --path myapp --template default --only frontend backend
 newsetup new --path . --template default --bare                  # config root files only, no modules
-newsetup new --path . --template default --bare --force          # overwrite existing root files
+newsetup new --path . --template default --bare --force          # overwrite existing root files (no prompt)
 ```
 
 ## Model
@@ -31,8 +31,13 @@ newsetup new --path . --template default --bare --force          # overwrite exi
   Omit `--only` to build all modules. `--only` and `--bare` are mutually
   exclusive.
 - **`--bare`** builds config root files only (no modules).
-- **`--force`** overwrites existing root config files. Module folders that
-  already exist and are non-empty always abort (never clobbered).
+- **Config conflicts.** If a root config file (e.g. `CLAUDE.md`) already exists,
+  `newsetup` prompts per file: **[o]verride** (replace), **[m]erge** (keep the
+  existing file, append a blank line, then the template's content), or
+  **[s]kip** (leave it untouched). In a non-interactive shell it aborts instead
+  of prompting — pass `--force` there.
+- **`--force`** overwrites existing root config files without prompting. Module
+  folders that already exist and are non-empty always abort (never clobbered).
 - `git init` runs on every scaffold. If any command exits nonzero, `newsetup`
   stops.
 
